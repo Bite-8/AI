@@ -2,6 +2,8 @@
 
 Mark1 は、NumPy で実装した最小構成の Decoder-only Transformer 言語モデルです。
 
+> **ステータス**: Day1〜5相当 + 完了レポート作成まで完了。Day6の定量評価は暫定的にスコープ外とした。詳細は [`MARK1_COMPLETION_REPORT.md`](./MARK1_COMPLETION_REPORT.md) を参照。恒久的な放棄ではなく、必要になれば再開可能。改善点は [`docs/memo/backlog.md`](../memo/backlog.md) で継続管理する。
+
 ## 最終ゴール
 
 このプロジェクトの最終ゴールは、**いろいろな意味で人間を超えるAI**を作ることです。
@@ -74,3 +76,4 @@ python train_min.py
 - `MARK1_DAY1_DETAILED_PLAN.md` : Day1（環境準備 + I/O設計）の詳細実行プラン
 - `MARK1_IMPLEMENTATION.md` : NumPy Transformer実装メモ（shape遷移/第一次情報リンク）
 - `MARK1_DATAFLOW_EXPLANATION.md` : Mark1の実行結果をもとにしたデータフロー解説
+- `MARK1_COMPLETION_REPORT.md` : Mark1完了レポート（実施内容・制約・次アクション）
