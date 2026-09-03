@@ -8,9 +8,9 @@ from uuid import uuid4
 
 import numpy as np
 
-from decode import generate
-from model import NumpyTransformerLM, TransformerConfig
-from tokenizer import CharTokenizer
+from .decode import generate
+from .model import NumpyTransformerLM, TransformerConfig
+from .tokenizer import CharTokenizer
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -8,8 +8,8 @@ shape flow remains easy to follow without full backprop through Transformer.
 
 import numpy as np
 
-from model import NumpyTransformerLM, TransformerConfig
-from tokenizer import CharTokenizer
+from .model import NumpyTransformerLM, TransformerConfig
+from .tokenizer import CharTokenizer
 
 
 def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:

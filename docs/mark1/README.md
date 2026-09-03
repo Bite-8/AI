@@ -31,12 +31,12 @@ pip install numpy
 
 ## model の実行方法
 
-リポジトリルートで `main.py` を実行すると、プロンプトを入力にしてモデルの forward と簡易生成を行います。
+リポジトリルートで `mark1` パッケージを実行すると、プロンプトを入力にしてモデルの forward と簡易生成を行います。
 
 ### 最小実行例
 
 ```bash
-python main.py --prompt "こんにちは、Mark1"
+python -m mark1 --prompt "こんにちは、Mark1"
 ```
 
 ### 主なオプション
@@ -55,7 +55,7 @@ python main.py --prompt "こんにちは、Mark1"
 例:
 
 ```bash
-python main.py \
+python -m mark1 \
   --prompt "transformerの挙動を確認したい" \
   --max-new-tokens 16 \
   --temperature 0.7 \
@@ -67,7 +67,7 @@ python main.py \
 最小の学習デモ（LM headバイアス更新のみ）は次で実行できます。
 
 ```bash
-python train_min.py
+python -m mark1.train_min
 ```
 
 ## ドキュメント一覧

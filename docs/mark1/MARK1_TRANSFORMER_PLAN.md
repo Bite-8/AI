@@ -47,16 +47,16 @@
 - 実装方針: まずは自作Transformerブロック
 - 補助ライブラリ: 可能なら標準ライブラリ中心（`json`, `argparse`, `time`）
 - ログ: JSONLで入出力・shape・推論時間を記録
-- CLI: `python main.py --prompt "..."`
+- CLI: `python -m mark1 --prompt "..."`
 
 > 高レベルライブラリで隠蔽される処理を減らし、「何がどの形で流れるか」を理解する。
 
 ## 5. 実装アーキテクチャ（最小）
-- `tokenizer.py`: 文字または簡易サブワード分割
-- `model.py`: Embedding / Attention / FFN / LayerNorm / 出力層
-- `decode.py`: greedy と sampling
-- `train_min.py`: 任意（超小規模データでの学習ループ）
-- `main.py`: CLI入口
+- `mark1/tokenizer.py`: 文字または簡易サブワード分割
+- `mark1/model.py`: Embedding / Attention / FFN / LayerNorm / 出力層
+- `mark1/decode.py`: greedy と sampling
+- `mark1/train_min.py`: 任意（超小規模データでの学習ループ）
+- `mark1/main.py`: CLI入口
 - `logs/*.jsonl`: shapeと出力結果ログ
 
 ## 6. 7日版（最速）実行プラン
@@ -85,7 +85,7 @@
 - 1ブロック推論を通す
 
 **成果物**
-- `model.py` 最小版
+- `mark1/model.py` 最小版
 - shape遷移ログ
 
 ### Day 4: デコード処理実装
@@ -94,7 +94,7 @@
 - 出力品質の違いを確認
 
 **成果物**
-- `decode.py`
+- `mark1/decode.py`
 - デコード比較メモ
 
 ### Day 5: （任意）超小規模学習ループ
@@ -102,7 +102,7 @@
 - 学習しない場合は重み固定で推論確認に集中
 
 **成果物**
-- `train_min.py`（任意）
+- `mark1/train_min.py`（任意）
 - 損失推移または学習スキップ理由メモ
 
 ### Day 6: 最小ユースケース化
