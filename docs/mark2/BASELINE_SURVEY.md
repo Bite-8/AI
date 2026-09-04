@@ -21,10 +21,8 @@
 
 ## Reproduction record
 
-選定したbaselineについて、次を固定して記録する。
+上の比較表は候補の一次スクリーニング用。ここでは、選定したbaseline 1件について、比較表の「正確な版・commit」「ライセンス」欄より詳細な実行条件を固定して記録する。
 
-- repository URL / commit SHA / model revision
-- ライセンスと利用上の制約
 - Python、accelerator、driver、主要依存関係の版
 - ハードウェア、precision、seed、入力長、batch size
 - データセット名・版・split・取得方法

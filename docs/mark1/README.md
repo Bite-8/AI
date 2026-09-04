@@ -4,17 +4,13 @@ Mark1 は、NumPy で実装した最小構成の Decoder-only Transformer 言語
 
 > **ステータス**: Day1〜5相当 + 完了レポート作成まで完了。Day6の定量評価は暫定的にスコープ外とした。詳細は [`MARK1_COMPLETION_REPORT.md`](./MARK1_COMPLETION_REPORT.md) を参照。恒久的な放棄ではなく、必要になれば再開可能。改善点は [`docs/memo/backlog.md`](../memo/backlog.md) で継続管理する。
 
-## 最終ゴール
+## プロジェクトの位置づけ
 
-このプロジェクトの最終ゴールは、**いろいろな意味で人間を超えるAI**を作ることです。
-
-ここでの「人間を超える」は、単に会話がうまいAIではなく、学習能力、推論能力、記憶能力、自律的な行動、道具の利用、自己改善、安全性など、複数の観点で人間の限界を超えるAIを目指す、という意味です。
+このリポジトリは、公開AIモデルをベースラインとして理解し、脳科学・計算論的神経科学から得た計算原理を最小単位で検証する研究プロジェクトです。現在の目的と成功条件は [`docs/mark2/README.md`](../mark2/README.md) を参照してください。
 
 ## Mark1の位置づけ
 
-Mark1は最終形そのものではなく、そのための最初の実験機です。
-
-まずはTransformerの内部構造をブラックボックスにせず、Tokenizer、Embedding、Self-Attention、Multi-Head Attention、FFN、LayerNorm、デコード処理を自分で追えるようにすることを目的とします。NumPy中心の小さな実装から始め、AIの仕組みを理解しながら、Mark2以降のより高度なAIへ発展させます。
+Mark1はその出発点として、Transformerの内部構造をブラックボックスにせず、Tokenizer、Embedding、Self-Attention、Multi-Head Attention、FFN、LayerNorm、デコード処理を自分で追えるようにすることを目的とした最初の実験機です。NumPy中心の小さな実装から始め、AIの仕組みを理解した上で、Mark2の比較研究へつなげます。
 
 ## 前提環境
 
