@@ -18,7 +18,7 @@ Day1は、以降の実装で迷わないために「実装の土台」を固定�
 1. Python + NumPyの最小環境を準備
 2. ディレクトリ構成の雛形作成
 3. tokenizerの試作（文字ベースで可）
-4. CLI入口 `main.py` の最小実装
+4. CLI入口 `mark1/main.py` の最小実装
 5. JSONLログ仕様の確定と出力実装
 6. 動作確認用の最小テスト（手動コマンドベース）
 
@@ -30,8 +30,8 @@ Day1は、以降の実装で迷わないために「実装の土台」を固定�
 ---
 
 ## 2. 期待アウトプット（成果物）
-- `main.py`（CLI入口）
-- `tokenizer.py`（encode/decode）
+- `mark1/main.py`（CLI入口）
+- `mark1/tokenizer.py`（encode/decode）
 - `logs/` ディレクトリ + JSONLログ出力
 - `README_day1.md` または本書に準ずる運用メモ
 
@@ -40,11 +40,12 @@ Day1は、以降の実装で迷わないために「実装の土台」を固定�
 ## 3. 推奨ディレクトリ構成（Day1時点）
 ```text
 project_root/
-  main.py
-  tokenizer.py
-  decode.py           # Day4で実装、先に空ファイルでも可
-  model.py            # Day3で実装、先に空ファイルでも可
-  train_min.py        # Day5で実装、任意
+  mark1/
+    main.py
+    tokenizer.py
+    decode.py         # Day4で実装、先に空ファイルでも可
+    model.py          # Day3で実装、先に空ファイルでも可
+    train_min.py      # Day5で実装、任意
   logs/
     run_YYYYMMDD.jsonl
   data/
@@ -146,7 +147,7 @@ Day2以降でshape追跡できるよう、Day1でログを固定する。
 ---
 
 ### Task 5: CLI雛形実装と疎通確認（目安 45分）
-`python main.py --prompt "テスト"` で一連の流れが通ることを確認。
+`python -m mark1 --prompt "テスト"` で一連の流れが通ることを確認。
 
 **CLIの最小要件**
 - 引数未指定時にヘルプ表示
@@ -162,7 +163,7 @@ Day2以降でshape追跡できるよう、Day1でログを固定する。
 
 ## 5. Day1受け入れチェックリスト
 - [ ] `.venv` + NumPy環境が用意できた
-- [ ] `main.py` から `tokenizer.py` を呼び出せる
+- [ ] `mark1/main.py` から `mark1/tokenizer.py` を呼び出せる
 - [ ] encode/decodeが最低3ケースで動作
 - [ ] JSONLログを保存できる
 - [ ] 用語（token/token_id/seq_len）が文書とコードで一致

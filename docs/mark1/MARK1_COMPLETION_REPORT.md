@@ -10,15 +10,15 @@ Mark1は「Transformerの内部構造をブラックボックスにせず、Toke
 
 | 対象 | ファイル | 内容 |
 |---|---|---|
-| 環境・I/O設計 | `main.py`, `tokenizer.py` | CLI入口、文字単位tokenizer（encode/decode、特殊トークン） |
-| Attention / Transformer本体 | `model.py` | Embedding + causal self-attention + multi-head + FFN + LayerNorm + LM Head、shape trace付き |
-| デコード | `decode.py` | greedy / temperature sampling |
-| 最小学習ループ | `train_min.py` | LM head biasのみを更新するSGDデモ |
+| 環境・I/O設計 | `mark1/main.py`, `mark1/tokenizer.py` | CLI入口、文字単位tokenizer（encode/decode、特殊トークン） |
+| Attention / Transformer本体 | `mark1/model.py` | Embedding + causal self-attention + multi-head + FFN + LayerNorm + LM Head、shape trace付き |
+| デコード | `mark1/decode.py` | greedy / temperature sampling |
+| 最小学習ループ | `mark1/train_min.py` | LM head biasのみを更新するSGDデモ |
 | データフロー解説 | `MARK1_DATAFLOW_EXPLANATION.md` | 実行結果に基づくshape遷移の通し解説 |
 
 達成状況（`MARK1_TRANSFORMER_PLAN.md` 1節の完了条件との対比）:
 
-1. 最小Transformerの前向き計算を自作コードで追える → 達成（`model.py`のtrace出力）
+1. 最小Transformerの前向き計算を自作コードで追える → 達成（`mark1/model.py`のtrace出力）
 2. 最低1つのユースケースに回答できる → 未達成（重みが学習されていないため実用的な応答はできない）
 3. モデルの仕組みを説明できる → 達成（`MARK1_DATAFLOW_EXPLANATION.md`）
 4. 改善ポイントを次ステップに言語化できる → 達成（本レポート + `docs/memo/backlog.md`）
@@ -31,7 +31,7 @@ Mark1は「Transformerの内部構造をブラックボックスにせず、Toke
 
 ## 分かっている制約・弱点
 
-- `train_min.py`はAttention/FFNの重みを更新しない（LM head biasのみ）。実質的な学習とは言えない。
+- `mark1/train_min.py`はAttention/FFNの重みを更新しない（LM head biasのみ）。実質的な学習とは言えない。
 - 語彙(vocab)が実行のたびにプロンプト＋固定コーパスから再構築されるため、モデル重みを保存・再利用する仕組みがない。
 - 文字単位tokenizerのため、実用的な言語理解には遠い。
 - 上記の通り評価が未実施のため、生成品質について定量的な裏付けがない。

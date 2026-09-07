@@ -11,7 +11,7 @@ Mark1 は NumPy だけで実装された最小構成の Decoder-only Transformer
 この環境では `python` ではなく、リポジトリ内の仮想環境を使って実行した。
 
 ```bash
-.venv/bin/python main.py --prompt "Mark1のtransformer確認" --max-new-tokens 8 --temperature 0 --seed 42
+.venv/bin/python -m mark1 --prompt "Mark1のtransformer確認" --max-new-tokens 8 --temperature 0 --seed 42
 ```
 
 実行結果の要点:
@@ -37,11 +37,11 @@ Mark1 の主なプログラムは以下である。
 
 | ファイル | 役割 |
 |---|---|
-| `main.py` | CLI の入口。プロンプトを受け取り、トークナイズ、モデル実行、生成、ログ保存を行う。 |
-| `tokenizer.py` | 文字単位 tokenizer。文字列を token id に変換し、token id を文字列へ戻す。 |
-| `model.py` | NumPy Transformer 本体。Embedding、Self-Attention、FFN、LayerNorm、LM Head を実行する。 |
-| `decode.py` | 生成処理。最後の logits から次トークンを選び、逐次的に文章を伸ばす。 |
-| `train_min.py` | 最小学習デモ。Transformer 全体ではなく LM head の bias のみを更新する。 |
+| `mark1/main.py` | CLI の入口。プロンプトを受け取り、トークナイズ、モデル実行、生成、ログ保存を行う。 |
+| `mark1/tokenizer.py` | 文字単位 tokenizer。文字列を token id に変換し、token id を文字列へ戻す。 |
+| `mark1/model.py` | NumPy Transformer 本体。Embedding、Self-Attention、FFN、LayerNorm、LM Head を実行する。 |
+| `mark1/decode.py` | 生成処理。最後の logits から次トークンを選び、逐次的に文章を伸ばす。 |
+| `mark1/train_min.py` | 最小学習デモ。Transformer 全体ではなく LM head の bias のみを更新する。 |
 
 ## 全体データフロー
 
@@ -97,9 +97,9 @@ layer_1 output   : [1, 21, 64]
 logits           : [1, 21, 29]
 ```
 
-## 1. `main.py`: 実行全体の制御
+## 1. `mark1/main.py`: 実行全体の制御
 
-`main.py` は Mark1 の入口である。大きくは以下の処理を行う。
+`mark1/main.py` は Mark1 の入口である。大きくは以下の処理を行う。
 
 ```python
 args = parser.parse_args()
@@ -126,7 +126,7 @@ decoded_generated = tokenizer.decode(generated_ids, skip_special_tokens=True)
 
 ポイントは、語彙を外部ファイルから読むのではなく、実行時の `base_corpus` から作っている点である。つまり、今回の vocabulary size `29` は、プロンプトと固定文字列に含まれる文字から決まる。
 
-## 2. `tokenizer.py`: 文字列を token id に変換する
+## 2. `mark1/tokenizer.py`: 文字列を token id に変換する
 
 Mark1 の tokenizer は文字単位である。単語単位や BPE ではない。
 
@@ -151,7 +151,7 @@ Mark1 の tokenizer は文字単位である。単語単位や BPE ではない�
 
 この結果、sequence length は `21` になる。
 
-## 3. `model.py`: Transformer 本体
+## 3. `mark1/model.py`: Transformer 本体
 
 `NumpyTransformerLM.forward()` の入力は `input_ids: [B, T]` である。
 
@@ -310,7 +310,7 @@ logits : [1, 21, 29]
 
 `logits[0, -1]` は「最後の token の次にどの token が来そうか」を表すスコアである。
 
-## 4. `decode.py`: 次 token を選んで文章を伸ばす
+## 4. `mark1/decode.py`: 次 token を選んで文章を伸ばす
 
 `generate()` は、現在の token 列を model に入れ、最後の位置の logits から次 token を選ぶ。
 
@@ -344,7 +344,7 @@ generated_text : Mark1のtransformer確認oMMooooo
 
 ## 5. ログ保存
 
-`main.py` は実行結果を JSONL に追記する。
+`mark1/main.py` は実行結果を JSONL に追記する。
 
 ```python
 log_row = {
@@ -369,9 +369,9 @@ logs/run_20260607.jsonl
 
 ログには、入力、token id、shape trace、生成結果が残る。後から「どの設定で、どんな shape で、どんな出力になったか」を確認できる。
 
-## 6. 学習デモ `train_min.py`
+## 6. 学習デモ `mark1/train_min.py`
 
-`train_min.py` は本格的な Transformer 学習ではない。教育用に、LM head の bias だけを SGD で更新する。
+`mark1/train_min.py` は本格的な Transformer 学習ではない。教育用に、LM head の bias だけを SGD で更新する。
 
 データフロー:
 

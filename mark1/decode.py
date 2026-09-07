@@ -4,7 +4,7 @@ from typing import List, Sequence
 
 import numpy as np
 
-from model import NumpyTransformerLM
+from .model import NumpyTransformerLM
 
 
 def _sample_from_logits(logits: np.ndarray, temperature: float, rng: np.random.Generator) -> int:
