@@ -13,6 +13,7 @@ Mark2では「脳に近いこと」ではなく、**AIとして測定可能な�
 
 ```text
 mark1/              # 完了済みの教育用NumPy Transformer
+mark2/              # 環境確認と固定版Qwen3.5の推論・記録コマンド
 docs/mark1/         # Mark1の計画・実装記録・完了報告
 docs/mark2/         # Mark2の研究計画・比較表・実験テンプレート
 docs/memo/          # 未整理のアイデアとバックログ
@@ -30,3 +31,6 @@ python -m mark1.train_min
 
 詳細は [`docs/mark1/README.md`](./docs/mark1/README.md) を参照してください。
 
+## Mark2を開始する
+
+設定確認は `python3 -m mark2.run --check-config` で実行できます。GPU環境での導入・推論・記録の手順と検証状況は [`docs/mark2/RUNNING.md`](./docs/mark2/RUNNING.md) を参照してください。
