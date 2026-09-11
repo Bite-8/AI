@@ -1,4 +1,7 @@
 __pycache__/
 *.pyc
 logs/*.jsonl
+logs/mark2/
 .venv
+
+.venv-mark2/

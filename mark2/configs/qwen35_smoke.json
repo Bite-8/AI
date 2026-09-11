@@ -1,0 +1,13 @@
+{
+  "model_id": "Qwen/Qwen3.5-0.8B",
+  "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+  "seed": 42,
+  "max_input_tokens": 512,
+  "max_new_tokens": 128,
+  "repeats": 2,
+  "prompts": [
+    {"id": "explain", "text": "日本語で、虹ができる理由を短く説明してください。"},
+    {"id": "summarize", "text": "次の文を一文に要約してください。図書館は月曜日が休館です。火曜日から日曜日は午前9時から午後6時まで開館しています。"},
+    {"id": "arithmetic", "text": "りんごが3個あります。2個もらい、1個食べました。残りは何個ですか。短く答えてください。"}
+  ]
+}

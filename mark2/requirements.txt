@@ -1,0 +1,5 @@
+# Initial direct dependency pins; GPU execution has not yet been verified.
+# Install a suitable CUDA build of torch first; see docs/mark2/RUNNING.md.
+torch==2.10.0
+transformers==5.13.0
+accelerate==1.14.0
