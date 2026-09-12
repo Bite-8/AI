@@ -2,21 +2,22 @@
 
 このリポジトリは、公開AIモデルをベースラインとして理解し、脳科学・計算論的神経科学から得た計算原理を最小単位で検証する研究プロジェクトです。
 
-## 構成方針
-
-過去に完成した世代のスナップショットは `mark{n}/` ディレクトリとしてmainに残さず、完了時点のcommitへのgit tagとGitHub Releaseで管理します。mainは常に現在の研究コードだけを表します。世代の中で今も参照・教育価値があるものだけを、意味ベースの場所（`prototypes/`, `docs/reference/` など）に残します。
+## ディレクトリ構成
 
 ```text
-ai_research/        # 現在の研究基盤（公開モデルの推論・記録コマンド）
-configs/            # 実験設定ファイル
-prototypes/         # 過去に作った独立した参照価値のあるプロトタイプ
-docs/research/       # 現在の研究計画・進行状況・実行手順
-docs/experiments/    # 実験テンプレート・個別実験の計画と証跡
+ai_research/          # 現在の研究基盤（公開モデルの推論・記録コマンド）
+configs/              # 実験設定ファイル
+prototypes/           # 過去に作った独立した参照価値のあるプロトタイプ
+tests/                # ユニットテスト
+docs/research/        # 現在の研究計画・進行状況・実行手順
+docs/experiments/     # 実験テンプレート・個別実験の計画と証跡
 docs/decisions/       # baseline選定など、根拠付きの意思決定記録
 docs/reference/       # 特定の研究フェーズに紐付かない技術解説
 docs/memo/            # 未整理のアイデアとバックログ
-logs/                # 実行時に生成されるローカルログ（原則git管理外）
+logs/                 # 実行時に生成されるローカルログ（原則git管理外）
 ```
+
+過去世代（`mark{n}`）をmainにディレクトリとして残さずtag/Releaseで管理する方針は[`docs/decisions/generation-snapshots.md`](./docs/decisions/generation-snapshots.md)を参照してください。
 
 ## 現在のフェーズ
 
