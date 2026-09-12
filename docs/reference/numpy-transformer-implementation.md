@@ -9,14 +9,14 @@
 > Mark1は上記の式・構成（自己注意、位置情報、残差接続、LayerNorm）を、NumPyのみで追える形に単純化して実装した。
 
 ## 実装の要点
-- `mark1/model.py`
+- `prototypes/numpy_transformer/model.py`
   - デコーダ専用の最小Transformer (`NumpyTransformerLM`)
   - 構成: Token埋め込み + 位置埋め込み + (Self-Attention + FFN)×L + LM Head
   - 因果マスク付き自己注意（未来トークン参照禁止）
   - 各段階のshapeを `trace` として返す
-- `mark1/decode.py`
+- `prototypes/numpy_transformer/decode.py`
   - greedy (`temperature=0`) と温度付きサンプリング (`temperature>0`)
-- `mark1/main.py`
+- `prototypes/numpy_transformer/main.py`
   - CLIで prompt を受け取り、前向き計算と生成を実行
   - shape trace を標準出力とJSONLへ保存
 
@@ -43,11 +43,11 @@
 4. 出力層
    - LM Head: `[B, T, V]`
 
-この形の遷移は `mark1/main.py` の実行時に `trace` として確認できる。
+この形の遷移は `prototypes/numpy_transformer/main.py` の実行時に `trace` として確認できる。
 
 ## 実行例
 ```bash
-python -m mark1 --prompt "Mark1のtransformer確認" --max-new-tokens 8 --temperature 0
+python -m prototypes.numpy_transformer --prompt "Mark1のtransformer確認" --max-new-tokens 8 --temperature 0
 ```
 
 ログは `logs/run_YYYYMMDD.jsonl` に追記される。

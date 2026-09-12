@@ -1,6 +1,6 @@
 """Collect experiment resource information without ML dependencies.
 
-Usage: python -m mark2.environment --output logs/mark2/environment.json
+Usage: python -m ai_research.environment --output logs/ai_research/environment.json
 """
 
 from __future__ import annotations

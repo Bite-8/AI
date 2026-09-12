@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from .environment import collect, run_command
 
-DEFAULT_CONFIG = Path(__file__).parent / "configs" / "qwen35_smoke.json"
+DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "configs" / "qwen35_smoke.json"
 
 
 def read_config(path: Path) -> dict:
@@ -107,7 +107,7 @@ def execute(cfg: dict, run_dir: Path, manifest: dict) -> None:
         import torch
         from transformers import AutoTokenizer, GenerationConfig, Qwen3_5ForCausalLM
     except ImportError as exc:
-        raise RuntimeError("Install mark2/requirements.txt on the GPU machine; see docs/mark2/RUNNING.md") from exc
+        raise RuntimeError("Install ai_research/requirements.txt on the GPU machine; see docs/research/RUNNING.md") from exc
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA GPU required. This command does not download model weights on CPU-only hosts.")
     device = torch.device("cuda:0")
@@ -173,7 +173,7 @@ def execute(cfg: dict, run_dir: Path, manifest: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--output-root", type=Path, default=Path("logs/mark2"))
+    parser.add_argument("--output-root", type=Path, default=Path("logs/ai_research"))
     parser.add_argument("--check-config", action="store_true", help="Validate config only; no ML imports or downloads")
     args = parser.parse_args()
     try:

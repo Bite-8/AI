@@ -9,7 +9,7 @@ GitHubのIssueは使わない（ベンダーロックイン回避のため）。
 ## Open
 
 - [ ] 重みの永続化と再学習可能化: vocabを固定し、モデル重みをファイルに保存/読み込みできるようにする
-- [ ] 全パラメータの学習（本物のbackprop）: `mark1/train_min.py`をAttention/FFNまで含めた勾配計算に拡張し、実際に損失が下がることを確認する
+- [ ] 全パラメータの学習（本物のbackprop）: `prototypes/numpy_transformer/train_min.py`をAttention/FFNまで含めた勾配計算に拡張し、実際に損失が下がることを確認する
 - [ ] tokenizerの改善: 文字単位からBPE風のサブワード分割へ移行し、語彙効率と汎化を改善する
 
 ## Done

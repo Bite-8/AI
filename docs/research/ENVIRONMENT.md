@@ -2,7 +2,7 @@
 
 ## 現在確認した環境
 
-2026-09-08に `python3 -m mark2.environment --output logs/mark2/environment.json` を実行した。ユーザー申告によりAWS EC2上であり、IMDSv2の `instance-type` 読み取りで `t2.micro` を確認した。インスタンスの変更・新規起動は行っていない。
+2026-09-08に `python3 -m ai_research.environment --output logs/ai_research/environment.json` を実行した。ユーザー申告によりAWS EC2上であり、IMDSv2の `instance-type` 読み取りで `t2.micro` を確認した。インスタンスの変更・新規起動は行っていない。生の出力は [environment-2026-09-08.json](../experiments/evidence/environment-2026-09-08.json) に保存した。
 
 | 項目 | 観測値 |
 |---|---|
@@ -36,16 +36,16 @@ IMDSv2の `placement/region` からリージョンは `ap-northeast-1`（東京�
 リポジトリルートでPython 3.10以上を使い、追加パッケージなしで実行できる。
 
 ```bash
-python3 -m mark2.environment
+python3 -m ai_research.environment
 ```
 
 ファイルに保存する場合:
 
 ```bash
-python3 -m mark2.environment --output logs/mark2/environment-research.json
+python3 -m ai_research.environment --output logs/ai_research/environment-research.json
 ```
 
-同名ファイルは上書きしない。再測定時は別名を使う。モデル保存先が別ファイルシステムなら `--disk-path` にその既存パスを渡す。`logs/mark2/` はgit管理外であり、共有する判断根拠は本書へ転記する。
+同名ファイルは上書きしない。再測定時は別名を使う。モデル保存先が別ファイルシステムなら `--disk-path` にその既存パスを渡す。`logs/ai_research/` はgit管理外であり、共有する判断根拠は本書へ転記する。
 
 このコマンドはパッケージの版を調べるが、importやGPU演算の成功は保証しない。NVIDIA以外のアクセラレーターも別途確認する。Linux以外のメモリ取得分岐は用意しているが、現時点の実機確認はこのLinux環境のみ。
 
@@ -66,7 +66,7 @@ IMDSへの問い合わせはこの環境調査で個別に行った。汎用の�
 
 `計算機の時間単価 × 起動時間（セットアップ・取得・評価・待機を含む） + 保存容量に対する保持期間分の費用 + 通信・IP等の費用`
 
-円換算する場合は換算日・為替・税の扱いを明記する。候補インスタンスの公式単価を取得し、初回案は [FIRST_RUN_PLAN.md](./FIRST_RUN_PLAN.md) に記録した。実費は未測定。実測後に「1実験あたり費用 × 予定回数 + 固定費」から月額を提案する。
+円換算する場合は換算日・為替・税の扱いを明記する。候補インスタンスの公式単価を取得し、初回案は [FIRST_RUN_PLAN.md](../experiments/FIRST_RUN_PLAN.md) に記録した。実費は未測定。実測後に「1実験あたり費用 × 予定回数 + 固定費」から月額を提案する。
 
 料金体系の確認元（2026-09-08）:
 

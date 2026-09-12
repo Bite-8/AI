@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from mark2 import run
+from ai_research import run
 
 
 class ConfigTests(unittest.TestCase):
@@ -47,7 +47,7 @@ class ConfigTests(unittest.TestCase):
 
 class RecordingTests(unittest.TestCase):
     def invoke(self, folder, implementation):
-        with patch('sys.argv', ['mark2.run', '--output-root', folder]), \
+        with patch('sys.argv', ['ai_research.run', '--output-root', folder]), \
              patch.object(run, 'execute', side_effect=implementation), \
              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return run.main()
@@ -75,7 +75,7 @@ class RecordingTests(unittest.TestCase):
                 self.assertEqual(json.loads((directory / 'manifest.json').read_text())['status'], 'completed')
 
     def test_config_check_does_not_run_inference(self):
-        with patch('sys.argv', ['mark2.run', '--check-config']), patch.object(run, 'execute') as execute, \
+        with patch('sys.argv', ['ai_research.run', '--check-config']), patch.object(run, 'execute') as execute, \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(run.main(), 0)
             execute.assert_not_called()

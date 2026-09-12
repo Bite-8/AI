@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 logs/*.jsonl
-logs/mark2/
+logs/ai_research/
 .venv
 
-.venv-mark2/
+.venv-ai-research/

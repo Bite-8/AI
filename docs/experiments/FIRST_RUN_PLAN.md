@@ -8,7 +8,7 @@ Qwen3.5-0.8Bを、東京リージョンの `g6.xlarge`（NVIDIA L4、ホストRA
 
 この選択は、比較した候補のうち、最近のハイブリッド構造を小さく調べるという目的に基づく。最上位性能・最安・最速という評価ではない。L4環境でBF16推論を試す計画だが、ドライバ・PyTorch・カーネル互換性と実メモリは実機で確認する。公式インスタンス仕様表のGPUメモリ表記は22 GiB。
 
-- 第一候補: `Qwen/Qwen3.5-0.8B`（revisionはBASELINE_SURVEY.mdに固定）。Gated DeltaNetとAttentionの内部状態を追える。
+- 第一候補: `Qwen/Qwen3.5-0.8B`（revisionは[`docs/decisions/baseline-selection.md`](../decisions/baseline-selection.md)に固定）。Gated DeltaNetとAttentionの内部状態を追える。
 - 構造理解用の代替: `Qwen/Qwen3-0.6B` + `g4dn.xlarge`。より単純なAttention中心の構造を調べる場合に使う。T4ではFP16を候補とし、BF16環境との数値比較を同一条件扱いにしない。
 - 拡張候補: `Qwen/Qwen3.5-4B`。0.8Bで実行基盤ができた後に検討する。最初から複数モデルを動かす費用はかけない。
 
@@ -46,8 +46,8 @@ gp3は東京で$0.096/GB-month、IPv4は[公式VPC料金](https://aws.amazon.com
 
 ## 起動前に準備する実装と確認
 
-1. 固定revisionを読む推論入口を `mark2/` に実装する。tokenizer/chat template、dtype、生成条件、入力データを設定として保存する。推論入口は実装済み。GPU実機での読込・生成は未検証。
-2. PyTorch・Transformersの主要依存版とCUDA配布案はRUNNING.mdに記載した。実機で組合せを検証する。調査したTransformers commitを、そのまま動作確認済み依存版とは扱わない。
+1. 固定revisionを読む推論入口を `ai_research/` に実装する。tokenizer/chat template、dtype、生成条件、入力データを設定として保存する。推論入口は実装済み。GPU実機での読込・生成は未検証。
+2. PyTorch・Transformersの主要依存版とCUDA配布案は[`docs/research/RUNNING.md`](../research/RUNNING.md)に記載した。実機で組合せを検証する。調査したTransformers commitを、そのまま動作確認済み依存版とは扱わない。
 3. 日本語の短い質問、短文要約、簡単な計算の3件を開発用入力として固定する。これは疎通確認であり、能力改善の研究評価には使わない。
 4. 起動から2時間で停止する仕組み、失敗時の停止、終了状態の外部確認、結果の回収を準備する。プロセスのタイムアウトだけでEC2料金は止まらない。
 5. GPU割当・候補AZ・IAM権限・AMI・50 GBで足りるかを確認する。既存ネットワークを確認して通信・IP費用を補正する。
@@ -81,4 +81,4 @@ gp3は東京で$0.096/GB-month、IPv4は[公式VPC料金](https://aws.amazon.com
 
 AWS側の確認を続けるには、実行ロールで上記3つのDescribe操作を許可するか、管理者が対応する設定を確認する必要がある。起動・停止の権限は今回試していないため、不足しているとも保有しているとも断定しない。
 
-推論コマンドの実装・実行手順は [RUNNING.md](./RUNNING.md) を参照する。費用は概算として扱い、ネットワーク費用の詳細化を実装作業の前提にはしない。
+推論コマンドの実装・実行手順は [RUNNING.md](../research/RUNNING.md) を参照する。費用は概算として扱い、ネットワーク費用の詳細化を実装作業の前提にはしない。
