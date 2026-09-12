@@ -31,7 +31,7 @@
 - **Qwen/Qwen3.5-0.8B**: `2fc06364715b967f1860aea9cf38778875588b17` — [モデルカード](https://huggingface.co/Qwen/Qwen3.5-0.8B/blob/2fc06364715b967f1860aea9cf38778875588b17/README.md)、[config](https://huggingface.co/Qwen/Qwen3.5-0.8B/resolve/2fc06364715b967f1860aea9cf38778875588b17/config.json)、[LICENSE](https://huggingface.co/Qwen/Qwen3.5-0.8B/resolve/2fc06364715b967f1860aea9cf38778875588b17/LICENSE)。
 - **Qwen/Qwen3.5-4B**: `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` — [モデルカード](https://huggingface.co/Qwen/Qwen3.5-4B/blob/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/README.md)、[config](https://huggingface.co/Qwen/Qwen3.5-4B/resolve/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/config.json)、[LICENSE](https://huggingface.co/Qwen/Qwen3.5-4B/resolve/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/LICENSE)。
 
-公開メタデータ・configの取得結果は [調査記録](./evidence/models-2026-09-08.json) に保存した。名前に含まれるパラメーター数を、そのまま必要VRAMと扱わない。読込対象、共有重み、vision encoder、キャッシュ、活性値、precisionによって変わる。
+公開メタデータ・configの取得結果は [調査記録](../experiments/evidence/models-2026-09-08.json) に保存した。名前に含まれるパラメーター数を、そのまま必要VRAMと扱わない。読込対象、共有重み、vision encoder、キャッシュ、活性値、precisionによって変わる。
 
 ### 読んだ実装と介入可能性
 
@@ -59,5 +59,5 @@ Transformers調査commit: `0a959de1d2dd0c981f1f732dbd0fc31192bbfa66`。これは
 - **Primary baseline**: 研究用の正式採用は未決定。初回実行はQwen3.5-0.8Bを第一候補とする
 - **Small proxy**: Qwen3-0.6Bは構造理解用の代替候補。Qwen3.5の同等proxyとは扱わない
 - **提案日**: 2026-09-08（実行後に採否を更新）
-- **根拠**: 小さい公開モデルで最近のハイブリッド構造を理解し、状態の扱いを含む比較研究の入口を作る。予算条件は [初回実行計画](./FIRST_RUN_PLAN.md) を参照
+- **根拠**: 小さい公開モデルで最近のハイブリッド構造を理解し、状態の扱いを含む比較研究の入口を作る。予算条件は [初回実行計画](../experiments/FIRST_RUN_PLAN.md) を参照
 - **保留理由**: 4Bは実行基盤の確認後へ回す。Qwen3は初回に複数モデルを持ち込む工数を避けるため代替に留める。品質と費用の優劣は未測定

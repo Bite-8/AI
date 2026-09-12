@@ -27,7 +27,7 @@ Mark2は、以下の順に進める。未達のgateを飛ばして大規模実�
 
 ### M2.0 — Research foundation（現在）
 
-EC2 `t2.micro` の環境調査と、追加依存なしの `python3 -m mark2.environment` を実装済み。固定版Qwen3.5-0.8Bの推論・記録コマンドも実装済み。設定と記録処理を検証したが、GPU実機でのモデル導入・推論は未実施。実験用資源の起動は未実施。詳細は [`ENVIRONMENT.md`](./ENVIRONMENT.md) を参照する。
+EC2 `t2.micro` の環境調査と、追加依存なしの `python3 -m ai_research.environment` を実装済み。固定版Qwen3.5-0.8Bの推論・記録コマンドも実装済み。設定と記録処理を検証したが、GPU実機でのモデル導入・推論は未実施。実験用資源の起動は未実施。詳細は [`ENVIRONMENT.md`](./ENVIRONMENT.md) を参照する。
 
 - [x] 目的、非目的、成功原則を固定する
 - [x] baseline候補の比較項目を定義する
@@ -60,12 +60,11 @@ EC2 `t2.micro` の環境調査と、追加依存なしの `python3 -m mark2.envi
 ## Working documents
 
 - [`RUNNING.md`](./RUNNING.md) — 推論コマンド、GPU環境の準備、結果の読み方と検証範囲
-
-- [`BASELINE_SURVEY.md`](./BASELINE_SURVEY.md) — 公開モデル候補の選定表
 - [`WORKFLOW.md`](./WORKFLOW.md) — 現在のコードを起点とする作業順と到達条件
 - [`ENVIRONMENT.md`](./ENVIRONMENT.md) — 実測環境、未決定の予算、環境確認コマンド
-- [`FIRST_RUN_PLAN.md`](./FIRST_RUN_PLAN.md) — 初回モデル候補、東京リージョンの費用試算、起動前の準備
 - [`PRINCIPLE_MATRIX.md`](./PRINCIPLE_MATRIX.md) — 脳の計算原理と現代AIの対応・差分
-- [`EXPERIMENT_TEMPLATE.md`](./EXPERIMENT_TEMPLATE.md) — 仮説ごとの実験計画・結果・判断
+- [`baseline-selection.md`](../decisions/baseline-selection.md) — 公開モデル候補の選定表と採否
+- [`FIRST_RUN_PLAN.md`](../experiments/FIRST_RUN_PLAN.md) — 初回モデル候補、東京リージョンの費用試算、起動前の準備
+- [`EXPERIMENT_TEMPLATE.md`](../experiments/EXPERIMENT_TEMPLATE.md) — 仮説ごとの実験計画・結果・判断
 
 調査中の断片は`docs/memo/`に置き、根拠と判断が揃った時点でこのディレクトリへ移す。モデル本体やデータセットはライセンスと容量を確認し、原則としてリポジトリへ直接コミットしない。

@@ -1,8 +1,8 @@
-# Mark1 (NumPy Transformer)
+# NumPy Transformer prototype (Mark1)
 
-Mark1 は、NumPy で実装した最小構成の Decoder-only Transformer 言語モデルです。
+NumPy で実装した最小構成の Decoder-only Transformer 言語モデルです。「Mark1」として一人開発フェーズで完成させたプロトタイプで、現在はこの `prototypes/numpy_transformer/` に教材として保存しています。
 
-> **ステータス**: Day1〜5相当 + 完了レポート作成まで完了。Day6の定量評価は暫定的にスコープ外とした。詳細は [`MARK1_COMPLETION_REPORT.md`](./MARK1_COMPLETION_REPORT.md) を参照。恒久的な放棄ではなく、必要になれば再開可能。改善点は [`docs/memo/backlog.md`](../memo/backlog.md) で継続管理する。
+> **ステータス**: Day1〜5相当 + 完了レポート作成まで完了。Day6の定量評価は暫定的にスコープ外とした。恒久的な放棄ではなく、必要になれば再開可能。完了時点の計画・進捗・完了レポートはgit tag `mark1` とそのGitHub Releaseで参照できる（本リポジトリのmainには保持しない）。改善点は [`docs/memo/backlog.md`](../../docs/memo/backlog.md) で継続管理する。Transformer内部構造の解説は [`docs/reference/`](../../docs/reference/) を参照。
 
 ## 最終ゴール
 
@@ -31,12 +31,12 @@ pip install numpy
 
 ## model の実行方法
 
-リポジトリルートで `mark1` パッケージを実行すると、プロンプトを入力にしてモデルの forward と簡易生成を行います。
+リポジトリルートで `prototypes.numpy_transformer` パッケージを実行すると、プロンプトを入力にしてモデルの forward と簡易生成を行います。
 
 ### 最小実行例
 
 ```bash
-python -m mark1 --prompt "こんにちは、Mark1"
+python -m prototypes.numpy_transformer --prompt "こんにちは、Mark1"
 ```
 
 ### 主なオプション
@@ -55,7 +55,7 @@ python -m mark1 --prompt "こんにちは、Mark1"
 例:
 
 ```bash
-python -m mark1 \
+python -m prototypes.numpy_transformer \
   --prompt "transformerの挙動を確認したい" \
   --max-new-tokens 16 \
   --temperature 0.7 \
@@ -67,13 +67,11 @@ python -m mark1 \
 最小の学習デモ（LM headバイアス更新のみ）は次で実行できます。
 
 ```bash
-python -m mark1.train_min
+python -m prototypes.numpy_transformer.train_min
 ```
 
-## ドキュメント一覧
+## 関連ドキュメント
 
-- `MARK1_TRANSFORMER_PLAN.md` : Mark1全体計画（7日版/14日版）
-- `MARK1_DAY1_DETAILED_PLAN.md` : Day1（環境準備 + I/O設計）の詳細実行プラン
-- `MARK1_IMPLEMENTATION.md` : NumPy Transformer実装メモ（shape遷移/第一次情報リンク）
-- `MARK1_DATAFLOW_EXPLANATION.md` : Mark1の実行結果をもとにしたデータフロー解説
-- `MARK1_COMPLETION_REPORT.md` : Mark1完了レポート（実施内容・制約・次アクション）
+- [`docs/reference/numpy-transformer-implementation.md`](../../docs/reference/numpy-transformer-implementation.md) : 実装メモ（shape遷移/第一次情報リンク）
+- [`docs/reference/numpy-transformer-dataflow.md`](../../docs/reference/numpy-transformer-dataflow.md) : 実行結果をもとにしたデータフロー解説
+- Mark1完了時点の全体計画・Day1詳細プラン・完了レポートはgit tag `mark1` / GitHub Releaseを参照

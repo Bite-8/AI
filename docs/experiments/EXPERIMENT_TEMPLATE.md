@@ -1,6 +1,6 @@
 # Experiment: `<ID> <short title>`
 
-> このファイルをコピーし、`experiments/<ID>-<slug>.md`として使用する。実行前に「事前登録」までをcommitし、実行後に結果と判断を追記する。
+> このファイルをコピーし、`docs/experiments/<ID>-<slug>.md`として使用する。実行前に「事前登録」までをcommitし、実行後に結果と判断を追記する。
 
 ## Metadata
 

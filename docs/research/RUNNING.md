@@ -7,7 +7,7 @@
 追加パッケージや重みの取得なしで実行できる。
 
 ```sh
-python3 -m mark2.run --check-config
+python3 -m ai_research.run --check-config
 python3 -m unittest discover -s tests -v
 ```
 
@@ -20,10 +20,10 @@ python3 -m unittest discover -s tests -v
 ```sh
 python3 --version
 nvidia-smi
-python3 -m venv .venv-mark2
-. .venv-mark2/bin/activate
+python3 -m venv .venv-ai-research
+. .venv-ai-research/bin/activate
 python -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu128
-python -m pip install -r mark2/requirements.txt
+python -m pip install -r ai_research/requirements.txt
 python -m pip check
 python -c 'import torch; from transformers import Qwen3_5ForCausalLM; print(torch.__version__, torch.version.cuda, torch.cuda.is_available()); print(torch.cuda.get_device_name(0), torch.cuda.is_bf16_supported())'
 ```
@@ -33,15 +33,15 @@ PyTorchのCUDA 12.8配布指定は[公式インストール例](https://pytorch.
 ## 実行
 
 ```sh
-mkdir -p logs/mark2
-python -m pip freeze > logs/mark2/installed-requirements.txt
-python -m mark2.run
+mkdir -p logs/ai_research
+python -m pip freeze > logs/ai_research/installed-requirements.txt
+python -m ai_research.run
 ```
 
 出力先を変える場合:
 
 ```sh
-python -m mark2.run --output-root logs/mark2/trials
+python -m ai_research.run --output-root logs/ai_research/trials
 ```
 
 初回は重みをHugging Faceの標準キャッシュへ取得する。保存場所を変える場合は実験機で `HF_HOME` を専用の保存先に設定する。モデルとtokenizerは設定ファイルの同じcommit SHAを指定する。モデルのリモートPythonコードは実行しない。
@@ -52,9 +52,9 @@ python -m mark2.run --output-root logs/mark2/trials
 
 ## 実行条件と保存されるもの
 
-設定: `mark2/configs/qwen35_smoke.json`。固定入力3件を各2回、batch 1、入力上限512、生成上限128トークン。thinkingは無効、greedy生成、seed 42、量子化なしのBF16。上限超過の入力は切り捨てずエラーにする。各試行のキャッシュは独立させる。
+設定: `configs/qwen35_smoke.json`。固定入力3件を各2回、batch 1、入力上限512、生成上限128トークン。thinkingは無効、greedy生成、seed 42、量子化なしのBF16。上限超過の入力は切り捨てずエラーにする。各試行のキャッシュは独立させる。
 
-毎回 `logs/mark2/<時刻>-<ID>/` を新設する。
+毎回 `logs/ai_research/<時刻>-<ID>/` を新設する。
 
 | ファイル | 内容 |
 |---|---|
