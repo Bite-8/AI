@@ -5,3 +5,7 @@ logs/ai_research/
 .venv
 
 .venv-ai-research/
+artifacts/
+logs/
+__pycache__/
+*.py[cod]
