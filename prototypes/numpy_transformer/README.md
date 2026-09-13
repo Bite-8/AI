@@ -65,8 +65,3 @@ python -m prototypes.numpy_transformer \
 python -m prototypes.numpy_transformer.train_min
 ```
 
-## 関連ドキュメント
-
-- [`docs/reference/numpy-transformer-implementation.md`](../../docs/reference/numpy-transformer-implementation.md) : 実装メモ（shape遷移/第一次情報リンク）
-- [`docs/reference/numpy-transformer-dataflow.md`](../../docs/reference/numpy-transformer-dataflow.md) : 実行結果をもとにしたデータフロー解説
-- Mark1完了時点の全体計画・Day1詳細プラン・完了レポートはgit tag `mark1` / GitHub Releaseを参照
