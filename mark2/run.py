@@ -101,6 +101,8 @@ class TransformersBackend:
             raise RuntimeError("CUDA is required; refusing to download 55.6 GB of weights on a CPU-only host")
         if not torch.cuda.is_bf16_supported():
             raise RuntimeError("the baseline contract requires a BF16-capable CUDA GPU")
+        if torch.cuda.device_count() != 1:
+            raise RuntimeError("the candidate contract requires exactly one CUDA GPU")
 
         model_cfg = config["model"]
         data_cfg = config["dataset"]
@@ -142,7 +144,7 @@ class TransformersBackend:
             torch.cuda.reset_peak_memory_stats(index)
         started = time.perf_counter()
         model = AutoModelForMultimodalLM.from_pretrained(
-            model_cfg["id"], **kwargs, dtype=torch.bfloat16, device_map="auto"
+            model_cfg["id"], **kwargs, dtype=torch.bfloat16, device_map={"": 0}
         )
         model.eval()
         resolved_model_config = model.config.to_dict()

@@ -1,6 +1,6 @@
 # Evaluation contract
 
-機械可読なsource of truthは [`mark2/configs/qwen38_27b_mmlu.json`](../../mark2/configs/qwen38_27b_mmlu.json) である。この文書はその意図を説明する。
+Qwen3.8-27B候補について、機械可読なsource of truthは [`mark2/configs/qwen38_27b_mmlu.json`](../../mark2/configs/qwen38_27b_mmlu.json) である。この文書はその意図を説明する。モデルのprimary採用状況は[`BASELINE_DECISION.md`](BASELINE_DECISION.md)をsource of truthとし、Humanが選定を承認するまではこのconfigの存在を採用決定とは扱わない。
 
 ## Quality evaluation
 

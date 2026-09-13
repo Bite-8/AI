@@ -8,7 +8,7 @@ Qwen3.8-27Bの公式model cardには複数benchmarkの公表値がある。た�
 
 ## Repository-measured
 
-未実行。Issue #30でGPU構成・時間・費用・停止条件のHuman確認後、独立した2 runを行う。
+未実行。Qwen3.8-27Bのprimary採用確認と、その後のAWS Capacity Block構成・時間・費用・停止条件のHuman実行承認を得てから、独立した2 runを行う。
 
 ## Mock-only
 
@@ -17,6 +17,6 @@ Qwen3.8-27Bの公式model cardには複数benchmarkの公表値がある。た�
 ## Unverified
 
 - 実機上で固定revisionが完全にloadできること
-- 80GB級GPU 1基でOOMせず完走できること
+- AWS `p5.4xlarge`のH100 80 GB 1基でCPU/disk offloadなしに完走できること
 - 100問の所要時間とpeak memory
 - 独立2 runで予測が完全一致すること

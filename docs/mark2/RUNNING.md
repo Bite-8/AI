@@ -14,15 +14,15 @@ python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 
 ## 2. 有料GPU前の必須承認
 
-具体的な調査結果、提案構成、費用計算、phase別上限、停止・削除手順は [`PAID_GPU_PLAN.md`](PAID_GPU_PLAN.md) に固定する。Issue #30へその概要を提示し、Humanの明示確認を得るまで実機runを開始しない。
+まず[`BASELINE_DECISION.md`](BASELINE_DECISION.md)の候補比較についてHuman確認を得て、primary baselineを採用する。採用後、具体的なAWS構成、費用計算、phase別上限、停止・削除手順を [`PAID_GPU_PLAN.md`](PAID_GPU_PLAN.md) に固定する。実際のCapacity Block offeringをIssue #30またはPR #31へ提示し、別のHuman明示承認を得るまで購入・実機runを開始しない。
 
-- GPU型・枚数・VRAM・provider/region
-- 時間単価、上限時間、概算費用上限
+- GPU型・枚数・VRAM・AWS region/AZ・Capacity Block offering
+- 前払い予約額、予約期間、作業上限時間、概算費用上限
 - disk容量と保持費用
 - 停止条件（OOM、model/dataset revision不一致、依存不一致、1 runの上限時間、費用上限）
-- 終了後にinstanceとdiskを誰が停止・削除するか
+- 終了後にinstanceとEBS等の付随resourceを誰がterminate・削除するか
 
-runnerはcloud instanceの作成・停止・削除を行わない。
+runnerはcloud resourceの検索・購入・作成・停止・削除を行わない。
 
 ## 3. 実機環境
 

@@ -52,7 +52,7 @@ def validate_config(config: Any) -> dict[str, Any]:
     if model["license"] != "Apache-2.0":
         raise ValueError("model.license must be Apache-2.0")
     if model["dtype"] != "bfloat16" or model["quantization"] is not None:
-        raise ValueError("the primary contract requires unquantized bfloat16")
+        raise ValueError("the Qwen candidate contract requires unquantized bfloat16")
     if model["trust_remote_code"] is not False:
         raise ValueError("model.trust_remote_code must be false")
     if model["class"] != "AutoModelForMultimodalLM":
