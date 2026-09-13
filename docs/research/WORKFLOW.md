@@ -2,7 +2,7 @@
 
 ## 方針と現在地
 
-公開された高性能LLMを理解・再現し、脳の情報処理との共通点と差分を調べる。その差分から計算機上で検証可能な仕組みを取り入れ、能力・適応性・資源効率の改善を目指す。個人研究として反復できる費用を重視し、特定の脳原理や実装方式にはあらかじめ限定しない。
+Mark2のGoal、Success Criteria、Non-goals、完了条件、Human-in-the-loopの承認境界は [`README.md`](./README.md) をSingle Source of Truthとする。この文書は、それらを満たす実行順、成果物、stage gateを定める。
 
 実装済みの機能については、リポジトリの実行コードを唯一の判断基準とする。コメントや計画書だけで実装済みと判定しない。実測性能には実行条件と結果が別途必要であり、神経科学上の主張は一次文献で検証する。この文書の今後の成果物はすべて計画である。
 
@@ -14,8 +14,10 @@
 | `prototypes/numpy_transformer/tokenizer.py` と `prototypes/numpy_transformer/main.py` | 入力と固定文字列から毎回文字語彙を構築 | 公開モデルではそのモデルに対応するtokenizerを使う |
 | `prototypes/numpy_transformer/train_min.py`: `run_demo_train` | 更新するのは `model.b_vocab` のみ | 全体の逆伝播や追加学習基盤は未実装。冒頭コメントの `W_vocab` 更新という記述とは異なる |
 | `prototypes/numpy_transformer/decode.py`: `generate` | 毎回系列全体をforwardし、1トークンずつ生成 | キャッシュや持続する内部状態の実験基盤は未実装 |
-| `prototypes/numpy_transformer/main.py`: `log_row` | 入出力とshapeをJSONLに保存 | 全設定・依存版・時間・メモリを含む再現記録は新たに必要 |
-| リポジトリのファイル構成 | `ai_research/` の実行コード、公開重みの読込、評価器、依存関係の固定ファイルがない | 現在地は研究準備。モデル導入・評価から実装する |
+| `prototypes/numpy_transformer/main.py`: `log_row` | 入出力とshapeをJSONLに保存 | Mark1の教材であり、Mark2の実測証拠にはしない |
+| `ai_research/run.py` と `configs/qwen35_smoke.json` | 固定revisionのQwen3.5-0.8Bを読み、条件・出力・時間・CUDAメモリを保存する入口 | 設定・記録処理は実装済み。GPU実機でのモデル読込・推論は未検証 |
+| `tests/test_ai_research_run.py` | 固定revision、入力上限、失敗時artifact等を検査 | 推論本体はmockされ、モデルAPI、CUDA推論、品質は検証しない |
+| `docs/experiments/evidence/` | 編集環境、モデル公開情報、価格の調査記録 | baseline推論、評価、controlled experimentの実測結果はまだない |
 
 Mark1は教材として `prototypes/numpy_transformer/` に保存する。Mark1の全パラメーター学習やtokenizerの自作拡張を、Mark2開始の必須条件にはしない。Mark1のNumPy中心という設計判断をMark2へ自動的に引き継がず、必要なライブラリはコードを追えることを条件に選ぶ。
 
@@ -36,7 +38,7 @@ Mark1は教材として `prototypes/numpy_transformer/` に保存する。Mark1�
 - 候補を少数に絞り、公開範囲、ライセンス、モデル構造、変更可能なコード、推論と変更後の学習に必要な資源を比較する。
 - 最先端の参照候補と、継続的に実行するbaselineの役割を明記する。小型モデルを使う場合、その結果を大型モデルにも成立するものと扱わない。
 - `docs/decisions/baseline-selection.md` にモデル名・revision・選定理由を記録する。「最新」「トップレベル」は調査日と対象評価に対して根拠を示す。
-- 新設する `ai_research/` に読込・推論の入口を作り、依存関係とモデル版を固定する。モデルごとの入力形式と生成条件も保存する。
+- 既存の `ai_research/` の読込・推論入口をGPU実機で検証し、依存関係とモデル版を再現可能な形で固定する。モデルごとの入力形式と生成条件も保存する。
 
 成果物: 選定記録、依存関係の固定、無変更版の推論コード、実行設定、出力記録。重み本体は原則gitに入れず取得元と版を記録する。
 
@@ -83,7 +85,7 @@ Mark1は教材として `prototypes/numpy_transformer/` に保存する。Mark1�
 
 改善が見えたら別のデータ・条件で再検証し、予算が許せばより高性能なモデルへ適用する。大型化は自動的な必須工程にはしない。未検証の範囲は明記する。改善しなければ原因を整理して段階4へ戻る。
 
-Mark2の最小完了条件は、公開モデルの理解・再現、根拠付きの仮説、一つの比較実験、再現可能な判断が揃うこと。最新の最大モデルを超えることや、人間らしさ全般を実現することは、この最初の完了条件に含めない。
+Mark2の完了は、[`README.md`](./README.md) のCompletion conditionとSuccess Criteriaに証拠が揃った場合のみHumanが決定する。このstage gateを通過したことや、GitHub Issueをすべてcloseしたことだけでは完了としない。
 
 ## 日々の作業単位
 
@@ -92,4 +94,4 @@ Mark2の最小完了条件は、公開モデルの理解・再現、根拠付き
 3. 分かったこと、未確認のこと、次の問いを対応する実験記録へ追記する。
 4. 到達条件を満たした場合だけREADMEの進捗を更新する。
 
-直近の着手順は、実行資源と予算の記録 → モデル候補の比較 → 無変更版の読込・推論実装。脳由来の変更は、その後に選定する。
+直近の着手順は、Humanが承認した実行環境で無変更baselineを再現して正式採否を記録すること。その後、固定評価基盤の構築とbaselineのデータフロー調査を進め、仮説の事前登録、単一介入のcontrolled experimentへ進む。各作業は [`README.md`](./README.md) のHuman-in-the-loop workflowに従い、承認されたIssueだけを実施する。
