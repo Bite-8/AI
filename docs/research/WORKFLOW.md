@@ -2,7 +2,7 @@
 
 ## 方針と現在地
 
-Mark2のGoal、Success Criteria、Non-goals、完了条件、Human-in-the-loopの承認境界は [`README.md`](./README.md) をSingle Source of Truthとする。この文書は、それらを満たす実行順、成果物、stage gateを定める。
+Mark2のGoal、Success Criteria、Non-goals、完了条件、AIとユーザーの判断境界は、ルートの [`GOAL.md`](../../GOAL.md) をSingle Source of Truthとする。この文書は、それらを満たす実行順、成果物、stage gateを定める。
 
 実装済みの機能については、リポジトリの実行コードを唯一の判断基準とする。コメントや計画書だけで実装済みと判定しない。実測性能には実行条件と結果が別途必要であり、神経科学上の主張は一次文献で検証する。この文書の今後の成果物はすべて計画である。
 
@@ -85,7 +85,7 @@ Mark1は教材として `prototypes/numpy_transformer/` に保存する。Mark1�
 
 改善が見えたら別のデータ・条件で再検証し、予算が許せばより高性能なモデルへ適用する。大型化は自動的な必須工程にはしない。未検証の範囲は明記する。改善しなければ原因を整理して段階4へ戻る。
 
-Mark2の完了は、[`README.md`](./README.md) のCompletion conditionとSuccess Criteriaに証拠が揃った場合のみHumanが決定する。このstage gateを通過したことや、GitHub Issueをすべてcloseしたことだけでは完了としない。
+Mark2の完了は、[`GOAL.md`](../../GOAL.md) のCompletion conditionとSuccess Criteriaに証拠が揃った場合のみユーザーが決定する。stage gateやPRの数だけでは完了としない。
 
 ## 日々の作業単位
 
@@ -94,4 +94,4 @@ Mark2の完了は、[`README.md`](./README.md) のCompletion conditionとSuccess
 3. 分かったこと、未確認のこと、次の問いを対応する実験記録へ追記する。
 4. 到達条件を満たした場合だけREADMEの進捗を更新する。
 
-直近の着手順は、Humanが承認した実行環境で無変更baselineを再現して正式採否を記録すること。その後、固定評価基盤の構築とbaselineのデータフロー調査を進め、仮説の事前登録、単一介入のcontrolled experimentへ進む。各作業は [`README.md`](./README.md) のHuman-in-the-loop workflowに従い、承認されたIssueだけを実施する。
+直近の着手順は、ユーザーが承認した実行環境で無変更baselineを再現して正式採否を記録すること。その後、固定評価基盤の構築とbaselineのデータフロー調査を進め、仮説の事前登録、単一介入のcontrolled experimentへ進む。各作業では [`GOAL.md`](../../GOAL.md) と現状の差分を確認し、変更と判断事項をPRで提示する。

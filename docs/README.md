@@ -22,4 +22,4 @@
 
 `memo/` の内容は正式な仕様や設計とは限りません。確定した内容は、対応する `research/` / `experiments/` / `decisions/` 配下のドキュメントへ移します。
 
-Mark2のGoalと完了条件は [`research/README.md`](./research/README.md) をSingle Source of Truthとします。GitHub IssueはHumanが承認した作業の実行管理に使用しますが、Goal、実験証跡、意思決定の保存場所にはしません。
+プロジェクトのGoalと完了条件は、ルートの [`GOAL.md`](../GOAL.md) をSingle Source of Truthとします。作業の提案とレビュー中の判断事項はPRで扱い、確定後も必要な内容を対応する `research/` / `experiments/` / `decisions/` または設定へ反映します。
