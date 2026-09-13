@@ -10,15 +10,32 @@
 - 研究目的に適合するライセンス条件を確認できる
 - 固定条件でbaseline評価を再実行できる
 - 変更対象を局所化し、無変更版と比較できる
+- 公開情報と固定評価に基づき「高性能LLM」を比較対象として説明できる
 
-### 初回候補の比較（2026-09-08）
+Goalに対する比較対象を **reference baseline**、反復開発に使う小型モデルを **development proxy** と呼ぶ。reference baselineは最終的な改善主張の比較対象であり、proxyは実装・デバッグ・仮説の早期棄却に使う。proxy上の改善をreference baseline上の改善へ外挿しない。
+
+### 高性能reference候補の追加調査（2026-09-13）
+
+2026-09-08の小型候補調査後にGoalが「既存の高性能LLMを上回る改善」へ更新されたため、公開された高性能モデルを追加調査した。以下の性能値はモデル提供者の公表値であり、このリポジトリでは未再現である。
+
+| 候補 | 公開情報から確認した位置付け | 介入可能性 | 資源上の影響 | 状態 |
+|---|---|---|---|---|
+| Qwen3.8-27B | Qwenが公開モデル系列で最も高性能な世代と説明。公表値はGPQA Diamond 89.2、LiveCodeBench v6 90.3など | Apache-2.0の重みを取得可能。Qwen3.5系のGated DeltaNet / full attention構成を引き継ぐため、proxyとの介入概念を対応付けやすい | 27B denseのBF16重みだけで概算54 GB。現在のL4 22 GiB単機案では無量子化読込を見込めず、別構成の見積もりが必要 | **reference推奨案、未決定・未実行** |
+| Qwen3.5-35B-A3B | 35B total / 3B activeの公開MoE。Qwen3.5-Flashに対応する公開重みと説明される | Apache-2.0の重みを取得可能。0.8Bと同世代だが、dense FFNからMoEへ変わるため介入の同一性に注意が必要 | 配布物は約72 GB。active parameter数が小さくても全weightの保存・読込費用は小さくならない | 代替案、未実行 |
+
+Qwen3.8-27Bの固定候補revisionは `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`、Qwen3.5-35B-A3Bは `59d61f3ce65a6d9863b86d2e96597125219dc754`。いずれも2026-09-13にGitの`HEAD`参照を確認した固定点であり、採用決定ではない。
+
+- [Qwen3.8-27B model card](https://huggingface.co/Qwen/Qwen3.8-27B/blob/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/README.md) / [config](https://huggingface.co/Qwen/Qwen3.8-27B/resolve/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/config.json) / [LICENSE](https://huggingface.co/Qwen/Qwen3.8-27B/resolve/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/LICENSE)
+- [Qwen3.5-35B-A3B model card](https://huggingface.co/Qwen/Qwen3.5-35B-A3B/blob/59d61f3ce65a6d9863b86d2e96597125219dc754/README.md) / [config](https://huggingface.co/Qwen/Qwen3.5-35B-A3B/resolve/59d61f3ce65a6d9863b86d2e96597125219dc754/config.json) / [LICENSE](https://huggingface.co/Qwen/Qwen3.5-35B-A3B/resolve/59d61f3ce65a6d9863b86d2e96597125219dc754/LICENSE)
+
+### development proxy候補の比較（2026-09-08）
 
 モデル公式の設定とライセンス、Transformers実装を読み取りで確認した。重みのダウンロード・推論・学習は未実施。初回の実装コストを抑えるため、今回は小型Qwen候補を比較した。DeepSeek・Kimiを含む全モデルの網羅調査や、世界最高性能の選定ではない。
 
 | 候補 | コードから確認した構造 | 研究上の役割 | 推論の試行案 | 学習資源・再現性 | 状態 |
 |---|---|---|---|---|---|
 | Qwen3-0.6B | 28層、GQA、RoPE、RMSNorm、gated MLP | Mark1からの構造理解が容易な代替候補 | T4 / FP16、短文・batch 1 | 未測定 | 保留 |
-| Qwen3.5-0.8B | 24層、linear attention 18層とfull attention 6層、vision encoderあり | ハイブリッド構造と内部状態を調べる初回候補 | L4 / BF16、テキストのみ・短文・batch 1 | 未測定 | 初回の第一候補 |
+| Qwen3.5-0.8B | 24層、linear attention 18層とfull attention 6層、vision encoderあり | ハイブリッド構造と内部状態を調べるdevelopment proxy | L4 / BF16、テキストのみ・短文・batch 1 | 未測定 | proxy第一候補 |
 | Qwen3.5-4B | 32層、linear attention 24層とfull attention 8層、vision encoderあり | 小型実験後の拡張候補 | L4候補、実メモリは要検証 | 未測定。全体学習が同じGPUで可能とはしない | 後続候補 |
 
 0.8B/4BのFFNは確認した実装ではdense gated MLP。モデル系列全般のMoEという説明を、これらの個別モデルに当てはめない。推論状態の更新を学習済み重みの更新とも同一視しない。
@@ -54,10 +71,13 @@ Transformers調査commit: `0a959de1d2dd0c981f1f732dbd0fc31192bbfa66`。これは
 - 実行コマンド、設定ファイル、出力artifactの場所
 - 品質指標、wall-clock time、peak memory、演算量の推定方法
 
-## Decision
+## Proposed decision
 
-- **Primary baseline**: 研究用の正式採用は未決定。初回実行はQwen3.5-0.8Bを第一候補とする
-- **Small proxy**: Qwen3-0.6Bは構造理解用の代替候補。Qwen3.5の同等proxyとは扱わない
-- **提案日**: 2026-09-08（実行後に採否を更新）
-- **根拠**: 小さい公開モデルで最近のハイブリッド構造を理解し、状態の扱いを含む比較研究の入口を作る。予算条件は [初回実行計画](../experiments/FIRST_RUN_PLAN.md) を参照
-- **保留理由**: 4Bは実行基盤の確認後へ回す。Qwen3は初回に複数モデルを持ち込む工数を避けるため代替に留める。品質と費用の優劣は未測定
+- **Reference baseline推奨案**: Qwen3.8-27B。公開された高性能モデルであり、Qwen3.5-0.8Bと介入概念を対応付けやすい。評価軸と実行費用を確認してから正式採用する
+- **Development proxy推奨案**: Qwen3.5-0.8B。既存の固定設定とrunnerを活用する。proxy初回計画は [FIRST_RUN_PLAN.md](../experiments/FIRST_RUN_PLAN.md) を参照
+- **Proxy代替**: Qwen3-0.6BはAttention中心の構造理解用。Qwen3.8のGated DeltaNet介入を先行検証するproxyにはならない
+- **Reference代替**: Qwen3.5-35B-A3B。0.8Bと同世代だがMoE差分と配布サイズがあり、現時点ではQwen3.8-27Bより優先しない
+- **提案更新日**: 2026-09-13（正式採用、実行構成、評価軸は未決定）
+- **未解決事項**: Qwen3.8-27Bの無変更実行と改変後評価に必要なGPU構成・費用、採用する公開benchmark、proxyからreferenceへ移植して同一介入とみなす条件
+
+現在の`ai_research/run.py`はQwen3.5-0.8B専用であり、reference baselineを実行できない。referenceの実行コードを先に推測で追加せず、モデル・評価軸・予算の決定後に、固定revision、依存版、precision、推論方式を別設定として実装する。

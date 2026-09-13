@@ -20,7 +20,7 @@ logs/                 # 実行時に生成されるローカルログ（原則gi
 ## 現在のフェーズ
 
 - **Mark1（完了）**: NumPy製の最小Transformerで基本構造とデータフローを確認しました。当時の計画・進捗・完了レポートはgit tag `mark1` とそのGitHub Releaseを参照してください。今も参照価値のある実装は [`prototypes/numpy_transformer/`](./prototypes/numpy_transformer/)、Transformer解説は [`docs/reference/`](./docs/reference/) に残しています。
-- **Mark2（研究基盤構築中）**: 現代の公開モデルを再現可能なbaselineとして選定し、脳の計算原理から導いた仮説を一つずつ比較実験します。目的と完了条件は [`GOAL.md`](./GOAL.md)、現在地と研究上の進め方は [`docs/research/README.md`](./docs/research/README.md) を参照してください。
+- **Mark2（研究基盤構築中）**: 現代の公開モデルを再現可能なbaselineとして選定し、脳の計算原理から導いた仮説を一つずつ比較実験します。目的は [`GOAL.md`](./GOAL.md)、現在地・到達判定・研究上の進め方は [`docs/research/README.md`](./docs/research/README.md) を参照してください。
 
 
 ## NumPy Transformerプロトタイプを再実行する

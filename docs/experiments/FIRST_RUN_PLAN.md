@@ -1,14 +1,14 @@
-# 初回モデル実行の構成と見積もり
+# 開発用proxyの初回実行構成と見積もり
 
 調査日: 2026-09-08。状態: 提案。モデル推論、GPUインスタンス起動、学習は未実施。
 
 ## 推奨構成
 
-Qwen3.5-0.8Bを、東京リージョンの `g6.xlarge`（NVIDIA L4、ホストRAM 16 GiB）で短時間動かす。開発用 `t2.micro` は変更せず、実験機を分ける案とする。初回はテキスト入力のみ、量子化なし、batch size 1、入力上限512トークン、生成上限128トークン、固定入力3件とする。推論開始前に入力長を検査する。
+開発用proxy候補のQwen3.5-0.8Bを、東京リージョンの `g6.xlarge`（NVIDIA L4、ホストRAM 16 GiB）で短時間動かす。これはGoalで比較対象にする高性能reference baselineの実行計画ではない。開発用 `t2.micro` は変更せず、実験機を分ける案とする。初回はテキスト入力のみ、量子化なし、batch size 1、入力上限512トークン、生成上限128トークン、固定入力3件とする。推論開始前に入力長を検査する。
 
 この選択は、比較した候補のうち、最近のハイブリッド構造を小さく調べるという目的に基づく。最上位性能・最安・最速という評価ではない。L4環境でBF16推論を試す計画だが、ドライバ・PyTorch・カーネル互換性と実メモリは実機で確認する。公式インスタンス仕様表のGPUメモリ表記は22 GiB。
 
-- 第一候補: `Qwen/Qwen3.5-0.8B`（revisionは[`docs/decisions/baseline-selection.md`](../decisions/baseline-selection.md)に固定）。Gated DeltaNetとAttentionの内部状態を追える。
+- proxy第一候補: `Qwen/Qwen3.5-0.8B`（revisionは[`docs/decisions/baseline-selection.md`](../decisions/baseline-selection.md)に固定）。Gated DeltaNetとAttentionの内部状態を低コストで追う。
 - 構造理解用の代替: `Qwen/Qwen3-0.6B` + `g4dn.xlarge`。より単純なAttention中心の構造を調べる場合に使う。T4ではFP16を候補とし、BF16環境との数値比較を同一条件扱いにしない。
 - 拡張候補: `Qwen/Qwen3.5-4B`。0.8Bで実行基盤ができた後に検討する。最初から複数モデルを動かす費用はかけない。
 
@@ -61,7 +61,7 @@ gp3は東京で$0.096/GB-month、IPv4は[公式VPC料金](https://aws.amazon.com
 - 同じ条件を再実行して出力差を確認できる。完全一致を仮定せず差も記録する。
 - 結果を回収し、EC2の停止を確認できる。
 
-性能改善や脳原理の導入は次段階。初回に分かるのは、研究用のモデルを再現して動かすための実費と実行条件である。
+性能改善や脳原理の導入は次段階。初回に分かるのは、開発用proxyを再現して動かすための実費と実行条件である。この結果だけでは高性能reference baselineの再現やGoalの改善を示さない。
 
 ## ネットワークと権限の確認範囲
 

@@ -2,7 +2,7 @@
 
 ## 方針と現在地
 
-Mark2のGoal、Success Criteria、Non-goals、完了条件、AIとユーザーの判断境界は、ルートの [`GOAL.md`](../../GOAL.md) をSingle Source of Truthとする。この文書は、それらを満たす実行順、成果物、stage gateを定める。
+Mark2の目的は、ルートの [`GOAL.md`](../../GOAL.md) をSingle Source of Truthとする。この文書は、その目的を実証するための実行順、成果物、stage gateを定める。
 
 実装済みの機能については、リポジトリの実行コードを唯一の判断基準とする。コメントや計画書だけで実装済みと判定しない。実測性能には実行条件と結果が別途必要であり、神経科学上の主張は一次文献で検証する。この文書の今後の成果物はすべて計画である。
 
@@ -15,7 +15,7 @@ Mark2のGoal、Success Criteria、Non-goals、完了条件、AIとユーザー�
 | `prototypes/numpy_transformer/train_min.py`: `run_demo_train` | 更新するのは `model.b_vocab` のみ | 全体の逆伝播や追加学習基盤は未実装。冒頭コメントの `W_vocab` 更新という記述とは異なる |
 | `prototypes/numpy_transformer/decode.py`: `generate` | 毎回系列全体をforwardし、1トークンずつ生成 | キャッシュや持続する内部状態の実験基盤は未実装 |
 | `prototypes/numpy_transformer/main.py`: `log_row` | 入出力とshapeをJSONLに保存 | Mark1の教材であり、Mark2の実測証拠にはしない |
-| `ai_research/run.py` と `configs/qwen35_smoke.json` | 固定revisionのQwen3.5-0.8Bを読み、条件・出力・時間・CUDAメモリを保存する入口 | 設定・記録処理は実装済み。GPU実機でのモデル読込・推論は未検証 |
+| `ai_research/run.py` と `configs/qwen35_smoke.json` | 固定revisionのQwen3.5-0.8Bを読み、条件・出力・時間・CUDAメモリを保存する入口 | 開発用proxyの設定・記録処理は実装済み。高性能baselineではなく、GPU実機でのモデル読込・推論も未検証 |
 | `tests/test_ai_research_run.py` | 固定revision、入力上限、失敗時artifact等を検査 | 推論本体はmockされ、モデルAPI、CUDA推論、品質は検証しない |
 | `docs/experiments/evidence/` | 編集環境、モデル公開情報、価格の調査記録 | baseline推論、評価、controlled experimentの実測結果はまだない |
 
@@ -36,13 +36,13 @@ Mark1は教材として `prototypes/numpy_transformer/` に保存する。Mark1�
 ### 2. 公開モデルを選び、無変更で動かす（M2.1 前半）
 
 - 候補を少数に絞り、公開範囲、ライセンス、モデル構造、変更可能なコード、推論と変更後の学習に必要な資源を比較する。
-- 最先端の参照候補と、継続的に実行するbaselineの役割を明記する。小型モデルを使う場合、その結果を大型モデルにも成立するものと扱わない。
+- Goalに対する比較対象となる高性能reference baselineと、継続的に改変する小型proxyの役割を分ける。proxyだけの改善をreference baselineにも成立するものと扱わず、最終的に同じ介入をreference baselineへ移して比較する。
 - `docs/decisions/baseline-selection.md` にモデル名・revision・選定理由を記録する。「最新」「トップレベル」は調査日と対象評価に対して根拠を示す。
 - 既存の `ai_research/` の読込・推論入口をGPU実機で検証し、依存関係とモデル版を再現可能な形で固定する。モデルごとの入力形式と生成条件も保存する。
 
 成果物: 選定記録、依存関係の固定、無変更版の推論コード、実行設定、出力記録。重み本体は原則gitに入れず取得元と版を記録する。
 
-到達条件: 記録した手順で同じモデルをロードし、固定入力を再実行できる。
+到達条件: reference baselineとproxyの役割・固定revision・評価対象を説明でき、記録した手順で少なくともproxyをロードして固定入力を再実行できる。reference baselineを未実行のままGoal達成とは扱わない。
 
 ### 3. 内部処理を理解し、評価の土台を作る（M2.1 後半）
 
@@ -79,13 +79,13 @@ Mark1は教材として `prototypes/numpy_transformer/` に保存する。Mark1�
 
 成果物: コード差分、設定、raw結果、費用、分析、採用・修正・棄却の判断。
 
-到達条件: 第三者が無変更版と変更版を比較でき、差分と追加コストに基づく判断が残っている。性能改善そのものは完了の必須条件にしない。
+到達条件: 第三者が無変更版と変更版を比較でき、差分と追加コストに基づく判断が残っている。悪化・無効果なら仮説を修正または棄却して次の仮説へ進む。研究記録としては有効でも、性能改善がない結果だけでGoal達成とはしない。
 
 ### 6. 有望な結果を再検証し、次へ進む
 
-改善が見えたら別のデータ・条件で再検証し、予算が許せばより高性能なモデルへ適用する。大型化は自動的な必須工程にはしない。未検証の範囲は明記する。改善しなければ原因を整理して段階4へ戻る。
+proxyで改善が見えたら別のデータ・条件で再検証し、高性能reference baselineへ同じ原理を移して比較する。referenceで改善しなければ原因を整理して段階4へ戻る。referenceで改善した原理は、単独効果を壊していないことを再確認しながら他の採用原理との統合候補にする。
 
-Mark2の完了は、[`GOAL.md`](../../GOAL.md) のCompletion conditionとSuccess Criteriaに証拠が揃った場合のみユーザーが決定する。stage gateやPRの数だけでは完了としない。
+Mark2の到達は、公開された高性能LLMを同じ評価条件で上回る比較結果と、その改善を生んだ計算原理の採否・統合判断が揃った場合にのみ判断する。小型proxyの改善、stage gateやPRの数だけでは到達としない。
 
 ## 日々の作業単位
 
@@ -94,4 +94,4 @@ Mark2の完了は、[`GOAL.md`](../../GOAL.md) のCompletion conditionとSuccess
 3. 分かったこと、未確認のこと、次の問いを対応する実験記録へ追記する。
 4. 到達条件を満たした場合だけREADMEの進捗を更新する。
 
-直近の着手順は、ユーザーが承認した実行環境で無変更baselineを再現して正式採否を記録すること。その後、固定評価基盤の構築とbaselineのデータフロー調査を進め、仮説の事前登録、単一介入のcontrolled experimentへ進む。各作業では [`GOAL.md`](../../GOAL.md) と現状の差分を確認し、変更と判断事項をPRで提示する。
+直近の着手順は、高性能reference baseline・開発用proxy・最初の能力指標の組合せを決めること。その後、ユーザーが承認した実行環境でproxyを無変更再現し、固定評価基盤とデータフロー調査、仮説の事前登録、単一介入のcontrolled experimentへ進む。proxyで有望な結果を得たらreference baselineで再検証する。各作業では [`GOAL.md`](../../GOAL.md) と現状の差分を確認し、変更と判断事項をPRで提示する。
