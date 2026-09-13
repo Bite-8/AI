@@ -2,9 +2,7 @@
 
 特定の研究フェーズに縛られない、随時追記していく改善点・気づきのメモ。
 
-`docs/README.md`の方針通り、ここは整理前の置き場であり、正式なGoal、仕様、進捗、優先順位を表さない。Humanが着手を承認した項目はGitHub IssueでScopeとAcceptance Criteriaを管理し、研究内容は対応する`docs/research/`、`docs/experiments/`、`docs/decisions/`へ反映する。
-
-GitHub Issueは承認済み作業の実行管理にのみ使い、Goalや研究記録のSingle Source of Truthにはしない。ベンダーに依存させないGoal、実験条件・結果、判断はリポジトリ内に残す。
+`docs/README.md`の方針通り、ここは整理前の置き場であり、正式なGoal、仕様、進捗、優先順位を表さない。着手時は [`GOAL.md`](../../GOAL.md) と現状の差分から作業範囲と検証条件を定め、変更をPRでレビューする。研究内容は対応する`docs/research/`、`docs/experiments/`、`docs/decisions/`へ反映する。
 
 ## Open
 
