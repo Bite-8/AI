@@ -25,4 +25,4 @@ python3 -m mark2.run run --backend mock --run-id mock-2
 python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 ```
 
-実機baselineの前提、コマンド、承認手順は [`docs/mark2/RUNNING.md`](docs/mark2/RUNNING.md)、モデル選定根拠は [`docs/mark2/BASELINE_DECISION.md`](docs/mark2/BASELINE_DECISION.md)、結果の区分は [`docs/mark2/RESULTS.md`](docs/mark2/RESULTS.md) に記録します。
+実機baselineの前提、コマンド、承認手順は [`docs/mark2/RUNNING.md`](docs/mark2/RUNNING.md)、有料GPUの構成・費用上限・停止条件は [`docs/mark2/PAID_GPU_PLAN.md`](docs/mark2/PAID_GPU_PLAN.md)、モデル選定根拠は [`docs/mark2/BASELINE_DECISION.md`](docs/mark2/BASELINE_DECISION.md)、結果の区分は [`docs/mark2/RESULTS.md`](docs/mark2/RESULTS.md) に記録します。

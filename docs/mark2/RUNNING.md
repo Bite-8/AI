@@ -14,7 +14,7 @@ python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 
 ## 2. 有料GPU前の必須承認
 
-Issue #30へ以下を提示し、Humanの明示確認を得るまで実機runを開始しない。
+具体的な調査結果、提案構成、費用計算、phase別上限、停止・削除手順は [`PAID_GPU_PLAN.md`](PAID_GPU_PLAN.md) に固定する。Issue #30へその概要を提示し、Humanの明示確認を得るまで実機runを開始しない。
 
 - GPU型・枚数・VRAM・provider/region
 - 時間単価、上限時間、概算費用上限
