@@ -20,7 +20,7 @@ from .environment import collect, command
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = PACKAGE_DIR.parent
-DEFAULT_CONFIG = PACKAGE_DIR / "configs" / "qwen38_27b_mmlu.json"
+DEFAULT_CONFIG = PACKAGE_DIR / "configs" / "qwen35_9b_mmlu.json"
 ANSWER = re.compile(r"(?<![A-Za-z])([A-D])(?![A-Za-z])", re.IGNORECASE)
 
 
@@ -98,11 +98,11 @@ class TransformersBackend:
         except ImportError as exc:
             raise RuntimeError("install the exact versions in mark2/requirements.txt") from exc
         if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is required; refusing to download 55.6 GB of weights on a CPU-only host")
+            raise RuntimeError("CUDA is required; refusing to download 19.3 GB of weights on a CPU-only host")
         if not torch.cuda.is_bf16_supported():
             raise RuntimeError("the baseline contract requires a BF16-capable CUDA GPU")
         if torch.cuda.device_count() != 1:
-            raise RuntimeError("the candidate contract requires exactly one CUDA GPU")
+            raise RuntimeError("the primary contract requires exactly one CUDA GPU")
 
         model_cfg = config["model"]
         data_cfg = config["dataset"]

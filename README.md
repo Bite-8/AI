@@ -4,7 +4,7 @@
 
 ## 現在の構成
 
-- [`mark2/`](mark2/): Qwen3.8-27B候補を固定条件で検証するbaseline評価ハーネス
+- [`mark2/`](mark2/): 個人研究向けprimary候補Qwen3.5-9Bを固定条件で検証するbaseline評価ハーネス
 - [`docs/mark2/`](docs/mark2/): baseline選定、評価契約、実行手順、結果
 - [`prototypes/numpy_transformer/`](prototypes/numpy_transformer/): 完了済みMark1の教材用NumPy Transformer
 

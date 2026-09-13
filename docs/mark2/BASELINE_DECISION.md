@@ -2,95 +2,84 @@
 
 - Status: **選定案（Human decision待ち、未採用）**
 - Comparison date: 2026-09-13
-- Recommended candidate: `Qwen/Qwen3.8-27B`
-- Candidate revision: `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`
+- Research context: 個人研究（反復可能な費用と単一GPUでの変更容易性を優先）
+- Recommended primary: `Qwen/Qwen3.5-9B`
+- Candidate revision: `c202236235762e1c871ad0ccb60c8ee5ba337b9a`
 - Proposed scope: text-only, post-trained model, non-thinking mode, unquantized BF16
 
 ## 結論
 
-現時点ではprimary baselineを採用済みとはしない。候補比較とAWS費用調査に基づき、`Qwen/Qwen3.8-27B`を**Human確認にかける推奨候補**とする。固定評価configとrunnerは、この候補の実行可能性を検証するためのものとして扱う。
+個人研究のprimary baselineには`Qwen/Qwen3.5-9B`を推奨する。まだ採用済みとはせず、Human確認後に決定する。
 
-Qwen候補は27B dense、公開重み、Apache-2.0、公式Transformers対応で、BF16 weightは約55.6 GBである。AWSでは1基のH100 80 GBを持つ`p5.4xlarge`を候補にできる。一方、DeepSeek-V3とKimi-K2は総parameterを配置するため16 GPU級の公式例があり、AWS最小予約費の桁と分散実行の変数が増える。今回の100問pilotに対してはQwen候補が費用・実装・介入可能性のバランスに優れる。
+9Bは公開重み、Apache-2.0、公式Transformers対応で、公式公表のMMLU-Pro 82.5、GPQA Diamond 81.7と小型ながら強い。一方、BF16 checkpointは約19.3 GBでAWSのL4 24 GB 1基に収まる見込みがあり、On-Demandを数時間だけ使える。27BをH100 Capacity Blockで1回検証する案より、同じ予算で実装・失敗・再実行を何度も反復できることを重視した。
 
-ただし、次の2段階のHuman判断を分ける。
+役割は次のように分ける。
 
-1. **モデル選定**: この比較を確認し、Qwen3.8-27Bをprimary baselineとして採用するか判断する
-2. **有料実行**: 採用後、[`PAID_GPU_PLAN.md`](PAID_GPU_PLAN.md) の実際のCapacity Block offering、上限額、停止条件を別途承認する
+- **Primary**: Qwen3.5-9B。仮説の採否を判断する固定baseline
+- **Proxy**: Qwen3.5-4B。runnerや介入コードの安価な疎通用。proxyの改善をGoal達成の証拠にしない
+- **Scale-up confirmation**: Qwen3.8-27B。9Bで有望な仮説だけを、別Issue・別契約・別予算で確認する
 
-モデル選定が承認されるまでは、本書のstatusを「採用」に変えず、有料resourceも予約しない。採用された場合は承認コメントへのlinkと日付を本書へ追記する。却下された場合は同じ評価軸で候補を再比較し、configを変更する。
+これにより「小さいモデルだけで結論を出す」ことも「毎回H100の24時間予約が必要で反復できない」ことも避ける。Goalの最終主張には、9Bだけで十分かを事前登録された複数benchmarkとscale-up確認の結果から改めて判断する。
 
-## 比較方法
+Human判断は二段階に分ける。
 
-比較の対象はIssue #30が挙げた公開checkpointとし、次を確認した。
+1. 本書を確認し、Qwen3.5-9Bをprimary baselineとして採用する
+2. 採用後、[`PAID_GPU_PLAN.md`](PAID_GPU_PLAN.md) の実行直前単価、上限額、停止条件を別途承認する
 
-- 公開重み、ライセンス、固定revisionの有無
-- dense/MoE、総parameter数、1 tokenあたりのactive parameter数
-- 配布checkpointの数値形式とweight配置に必要な概算memory
-- 公式または公式が示す実行方法、model codeを変更できるか
-- 2026-09-13時点のAWS EC2 Capacity Blocksで必要となる構成と最低予約費
+## 個人研究向け評価軸
 
-weight memoryはcheckpoint metadataのtensor数とdtypeから求めた概算であり、KV cache、activation、CUDA context、inference engineのworkspaceを含まない。MoEのactive parameter数は1 tokenの計算量には関係するが、全expertのweight配置量を減らさない。
+候補は次の順で評価した。
 
-## モデル・実行要件の比較
+1. 1人で繰り返し支払える1 experiment cycleの費用
+2. 単一GPU、無量子化BF16、CPU/disk offloadなしで動かせること
+3. 公開重み・許容的license・内部componentへ介入できること
+4. 高性能baselineと呼べる提供者公表値を持つこと
+5. 新しさや最大性能。ただし、反復不能になる場合は優先しない
 
-| 候補 | 公開構造・配布形式 | weight memoryの目安 | ライセンス・介入可能性 | AWS上の実行判断 |
-|---|---|---:|---|---|
-| Qwen3.8-27B | dense 27,781,427,952 parameters、BF16 | 55.6 GB（約51.7 GiB） | Apache-2.0。重み・設定公開、Transformers対応 | `p5.4xlarge`のH100 80 GB x1をpreflight候補にできる。単一GPUのため分散方式を追加しない |
-| DeepSeek-V3 | MoE 671B main + 14B MTP、37B active、公式checkpointは主にFP8 | 公式checkpoint metadataから約688.6 GB。BF16 main weightsだけなら約1.34 TB | codeはMIT、weightsはDeepSeek Model License。重み・推論code公開 | H100 80 GB x8の640 GBにはcheckpointだけでも収まらない。公式demoは16 GPU / 2 nodeで、BF16なら少なくともH200 x16級を安全側の比較構成とする |
-| Kimi-K2 | MoE約1T、32B active、block-FP8 | metadata上のtensor storageは約1.03 TB（約958.5 GiB） | Modified MIT。重み公開、推奨engine公開 | H200 x8の1,128 GBは余裕が小さく、公式deployment guideの最小単位はFP8で16 GPU。AWS比較もH200 x16 / 2 nodeとする |
+provider公表benchmarkは実行条件がrepositoryのpilotと異なるため、候補の大まかな能力帯の確認にだけ使い、repository実測値として扱わない。
 
-Qwenの55.6 GBは27,781,427,952 BF16 parametersを2 bytesとして算出した。DeepSeekとKimiはHugging Faceのpinned checkpoint metadataにあるdtype別tensor数から算出した。実機でのpeak memory保証値ではないため、QwenについてもH100 80 GBでのloadをpreflightし、CPU/disk offloadなしで収まらなければ不採用または構成再検討とする。
+## 候補比較
 
-## AWS費用比較
+| 候補 | BF16 weight / 構造 | provider公表値の例 | AWSでの最小現実案 | 個人研究での役割 |
+|---|---:|---:|---|---|
+| Qwen3.5-4B | 9.33 GB / dense 4.66B | MMLU-Pro 79.1 | L4 24 GB x1 | 安価なproxy。primaryより能力余裕が小さい |
+| **Qwen3.5-9B** | **19.32 GB / dense 9.65B** | **MMLU-Pro 82.5、GPQA 81.7** | **`g6.2xlarge`, L4 24 GB x1, On-Demand** | **推奨primary。品質・費用・単一GPU介入の均衡が最良** |
+| Qwen3.5-35B-A3B | 71.93 GB / MoE 35.95B, 3B active | MMLU-Pro 85.3 | H100 80 GBは余裕が小さくpreflightリスクあり | 9Bとの差に対しweight配置とMoE介入が重い |
+| Qwen3.8-27B | 55.62 GB / dense 27.78B | Qwenが同family中の高能力世代として公表 | `p5.4xlarge`, H100 80 GB x1 Capacity Block | 有望仮説のscale-up確認。初期反復には高価 |
+| DeepSeek-V3 / Kimi-K2 | 約689 GB / 約1.03 TB / 大規模MoE | 条件不統一のため数値比較しない | 公式例は16 GPU級 | 個人研究のprimaryから除外 |
 
-比較条件はLinux、EC2 Capacity Blocks for ML、掲載表の米国東部価格（`p5.4xlarge`はN. Virginia、`p5e.48xlarge`はOhio）、最短1日である。Capacity Blockは1日単位、予約料金は前払いで、購入後は変更・キャンセルできない。実際のofferingは需給で変わるため、表は2026-09-13に確認した掲載単価による**比較見積もり**であり購入価格ではない。
+weight値は2026-09-13にHugging Face APIのpinned repository metadataから確認したtensor storageで、KV cache、activation、CUDA context、workspaceを含まない。
 
-| 候補・構成 | GPU memory | 掲載実効単価 | 4時間の作業時間相当 | 最短24時間の予約料金 |
-|---|---:|---:|---:|---:|
-| Qwen: `p5.4xlarge` x1（H100 x1） | 80 GB | $5.191/hour | $20.76 | **$124.58** |
-| DeepSeek: `p5e.48xlarge` x2（H200 x16） | 2,256 GB | $95.52/hour | $382.08 | **$2,292.48** |
-| Kimi: `p5e.48xlarge` x2（H200 x16） | 2,256 GB | $95.52/hour | $382.08 | **$2,292.48** |
+## AWS費用と反復性
 
-`p5e.48xlarge` x1（H200 x8、1,128 GB、$47.76/hour、24時間で$1,146.24）はDeepSeek FP8 checkpointの容量上は候補になり得るが、公式demoの16 GPU構成を満たさないため、未検証の下限案として採用比較には使わない。Kimiもweightだけならx1に近いが、公式guideが16 GPUを最小単位としているためx2で比較した。いずれもengine・precisionが現在のQwen用runnerと異なり、同じconfigの差し替えだけでは実行できない。
+Qwen3.5-9Bは`g6.2xlarge`（L4 24 GB x1、host RAM 32 GiB、local NVMe 450 GB）のLinux On-Demandを第一候補にする。On-Demandは60秒最低の秒課金で、長期契約・前払いがなく、短期で中断させたくない不定期workload向けとAWSが説明している。
 
-上表にOS premium、EBS、tax、internet転送、artifact保管は含まない。Qwen実行の詳細見積もりと上限は[`PAID_GPU_PLAN.md`](PAID_GPU_PLAN.md)に記す。
+2026-09-13にAWS Price List相当で確認したUS East (N. Virginia)の参考単価は$0.9776/hourで、4時間のcomputeは$3.91である。実行直前にAWS accountで単価とAZ availabilityを再確認する。これに対し、Qwen3.8-27B用`p5.4xlarge` Capacity Blockの既調査案は最低24時間$124.58だった。単純な1 cycle比較で約32分の1であり、個人研究では9Bを約30 cycle試せる予算を27Bの1予約に固定しない方がよい。
 
-## 推奨理由と反証条件
+Spotはさらに安い可能性があるが、2分前通知で中断され得る。最初の再現性baselineは環境差を増やさないOn-Demandとし、checkpoint付きで中断耐性を持つ後続batchだけをSpot候補にする。
 
-Qwenを推奨する主な理由は次のとおり。
+## 採用後の反証・昇格条件
 
-- 比較構成の最短予約料金が、大規模MoE候補の約18分の1である
-- 単一GPUかつ公式Transformers対応で、分散engine・通信topologyをcontrolled experimentの追加変数にしなくてよい
-- dense checkpointとApache-2.0により、後続の内部介入と再配布条件を扱いやすい
-- BF16のまま実行できる見込みがあり、FP8/量子化をbaseline契約へ持ち込まずに済む
+次のいずれかなら実行を止め、primaryまたは構成を再検討する。
 
-一方、これはQwenが他候補より品質面で優れているという結論ではない。各model cardのbenchmarkは条件が揃っておらず、このpilot contractとも同一ではないため、横並びの採否根拠にしない。
+- L4 24 GBで単一GPU BF16 loadに失敗する、または余裕不足で100問を完走できない
+- 固定revisionが固定依存で動かない
+- 脳型介入に必要なcomponentへ安定したaccess pointを定義できない
+- repositoryの事前登録benchmarkで高性能baselineとして不十分と判定される
 
-HumanがQwenを採用しても、次のいずれかなら有料実行を中止し、primary選定またはAWS構成へ戻る。
-
-- 購入前のCapacity Block offeringと付随料金が承認上限を超える
-- H100 80 GBでCPU/disk offloadなしのBF16 loadに失敗する
-- 固定revisionがrunnerの固定依存で動作しない
-- 後続の脳型介入に必要なmodel componentへ安定したaccess pointを定義できない
+9B上で再現可能な改善が出た後は、仮説を最大3件程度に絞り、同じ独立変数をQwen3.8-27Bへ移してscale-up確認する。27Bを日常の開発loopには使わない。
 
 ## 一次情報
 
-### Models
-
-- [Pinned Qwen3.8-27B repository](https://huggingface.co/Qwen/Qwen3.8-27B/tree/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0): model card、config、BF16 weights、Apache-2.0
-- [Qwen3.8 official repository](https://github.com/QwenLM/Qwen3.8): model familyと公式実行方法
-- [Pinned DeepSeek-V3 repository](https://huggingface.co/deepseek-ai/DeepSeek-V3/tree/e815299b0bcbac849fa540c768ef21845365c9eb): FP8/BF16 tensor metadataとcheckpoint容量
-- [DeepSeek-V3 official repository](https://github.com/deepseek-ai/DeepSeek-V3): 671B/37B構造、license、16 GPU / 2 nodeのdemo
-- [DeepSeek-V3 weight description](https://github.com/deepseek-ai/DeepSeek-V3/blob/main/README_WEIGHTS.md): main weightsとMTPの内訳
-- [Pinned Kimi-K2-Base repository](https://huggingface.co/moonshotai/Kimi-K2-Base/tree/bf2eca9bd560071ce3e29dac6cd32a6f1da3e601): block-FP8 checkpoint metadata
-- [Kimi-K2 official repository](https://github.com/MoonshotAI/Kimi-K2): 1T/32B構造、Modified MIT
-- [Kimi-K2 deployment guide](https://github.com/MoonshotAI/Kimi-K2/blob/main/docs/deploy_guidance.md): H200/H20上のFP8最小16 GPU構成
-- [MMLU dataset repository](https://huggingface.co/datasets/cais/mmlu/tree/c30699e8356da336a370243923dbaf21066bb9fe): MIT、固定dataset revision
-
-### AWS
-
-- [EC2 accelerated instance specifications](https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html): `p5.4xlarge`、`p5e.48xlarge`のGPU数とmemory
-- [EC2 P5 instance details](https://aws.amazon.com/ec2/instance-types/p5/): vCPU、host memory、local NVMe、network
-- [Capacity Blocks pricing](https://aws.amazon.com/ec2/capacityblocks/pricing/): region別の`p5.4xlarge`、`p5e.48xlarge`掲載単価
-- [Finding and purchasing Capacity Blocks](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-blocks-purchase.html): 1日単位、offering確認、予約後キャンセル不可
-- [Capacity Blocks billing](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-blocks-pricing-billing.html): 需給連動価格、前払い
+- [Pinned Qwen3.5-9B repository](https://huggingface.co/Qwen/Qwen3.5-9B/tree/c202236235762e1c871ad0ccb60c8ee5ba337b9a): weights、config、model card、Apache-2.0
+- [Qwen3.5-9B model card](https://huggingface.co/Qwen/Qwen3.5-9B/blob/c202236235762e1c871ad0ccb60c8ee5ba337b9a/README.md): provider公表benchmark
+- [Pinned Qwen3.5-4B repository](https://huggingface.co/Qwen/Qwen3.5-4B/tree/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a): proxy候補
+- [Pinned Qwen3.5-35B-A3B repository](https://huggingface.co/Qwen/Qwen3.5-35B-A3B/tree/59d61f3ce65a6d9863b86d2e96597125219dc754): MoE候補
+- [Pinned Qwen3.8-27B repository](https://huggingface.co/Qwen/Qwen3.8-27B/tree/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0): scale-up候補
+- [Qwen3.8 official repository](https://github.com/QwenLM/Qwen3.8): official familyと実行方法
+- [MMLU dataset repository](https://huggingface.co/datasets/cais/mmlu/tree/c30699e8356da336a370243923dbaf21066bb9fe): MIT、固定revision
+- [EC2 G6 specifications](https://aws.amazon.com/ec2/instance-types/g6/): L4 GPUとmemory
+- [EC2 accelerated instance specifications](https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html): `g6.2xlarge`のhost、GPU、NVMe
+- [EC2 On-Demand](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-on-demand-instances.html): 秒課金、60秒最低、前払いなし
+- [EC2 On-Demand pricing](https://aws.amazon.com/ec2/pricing/on-demand/): 実行前に再確認する単価
+- [EC2 Spot best practices](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-best-practices.html): 中断特性

@@ -1,123 +1,82 @@
 # AWS paid GPU execution plan
 
-- Status: **モデル選定・Human実行承認待ち（未予約・未実行）**
+- Status: **モデル選定・Human実行承認待ち（未作成・未実行）**
 - Price checked: 2026-09-13
-- Proposed workload: `Qwen/Qwen3.8-27B`、unquantized BF16、MMLU 100問、独立2 run
-- Purchase option: Amazon EC2 Capacity Blocks for ML
+- Proposed workload: `Qwen/Qwen3.5-9B`、unquantized BF16、MMLU 100問、独立2 run
+- Purchase option: Amazon EC2 Linux On-Demand
 
-## この計画の前提
+## 前提と選択理由
 
-[`BASELINE_DECISION.md`](BASELINE_DECISION.md)はQwen3.8-27Bを推奨候補としており、まだprimary baselineとして採用していない。まずモデル選定のHuman確認を得る。その後、この計画に対する別の明示承認を得るまでCapacity Blockを検索・購入しない。
+[`BASELINE_DECISION.md`](BASELINE_DECISION.md)は個人研究向けprimaryとしてQwen3.5-9Bを推奨しているが、まだ採用していない。モデル選定と、この有料実行のHuman承認を順に得るまでinstanceを起動しない。
 
-Capacity Blockは通常の4時間従量課金として扱えない。AWS公式手順ではdurationは1日単位で、料金は購入時に前払いされ、予約後は変更・キャンセルできない。そのため、作業上限が4時間でも最低24時間分を予算化する。
+短期・不定期で中断させたくない初回baselineなので、秒課金（60秒最低）・前払いなしのOn-Demandを使う。Spotは安い可能性があるが中断が再現性検証を汚すため初回には使わない。Capacity Blockは24時間前払いが個人研究の反復性を損なうため使わない。
 
 ## 提案構成
 
 | 項目 | 固定する内容 |
 |---|---|
-| Provider | Amazon Web Services / Amazon EC2 Capacity Blocks for ML |
-| Region | US East (N. Virginia)を第一候補。購入前に返されたAvailability Zoneとoffering IDを承認コメントへ記録する |
-| Instance | `p5.4xlarge` x1 |
-| GPU | NVIDIA H100 x1、80 GB HBM3、MIG不使用 |
-| Host | 16 vCPU、256 GiB RAM |
-| Local storage | 3.84 TB NVMe instance store。model cacheと一時artifactに使用し、終了時に消失する前提 |
-| EBS | 暗号化gp3 root 100 GB、baseline 3,000 IOPS / 125 MiB/s。追加IOPS・throughputなし |
-| OS | AWS提供Linux AMI。premium OSを使わない。AMI IDを実行記録へ残す |
-| Numerical contract | BF16、量子化なし、TF32なし、CPU/disk offloadなし。OOM時も自動変更しない |
-| Software | `mark2/requirements.txt`のexact pin、固定model/dataset revision、実行commitをmanifestへ記録する |
+| Provider | Amazon Web Services / Amazon EC2 On-Demand |
+| Region | US East (N. Virginia)。起動前に利用可能AZと単価を承認コメントへ記録 |
+| Instance | `g6.2xlarge` x1 |
+| GPU | NVIDIA L4 x1、24 GB、MIG不使用 |
+| Host | 8 vCPU、32 GiB RAM |
+| Local storage | 450 GB NVMe。model cacheと一時artifactに使用し終了時消失 |
+| EBS | 暗号化gp3 root 100 GB、3,000 IOPS / 125 MiB/s。追加性能なし |
+| Numerical contract | BF16、量子化なし、TF32なし、CPU/disk offloadなし |
+| Software | exact pin、固定model/dataset revision、実行commitをmanifestへ記録 |
 
-Qwen3.8-27BのBF16 weightsは約55.6 GBで、H100 80 GBに残る約24.4 GBをCUDA context、activation、KV cache、framework領域へ使える。ただしこれは容量計算であって実機保証ではない。preflightでCPU/disk offloadなしのloadとGPU配置を確認し、収まらなければ停止する。
-
-AWS公式仕様では`p5.4xlarge`はH100 80 GB x1、256 GiB host memory、3.84 TB local NVMeを持つ。2026-09-13時点の[Capacity Blocks pricing](https://aws.amazon.com/ec2/capacityblocks/pricing/)はUS East (N. Virginia)の`p5.4xlarge`を**$5.191/instance-hour**と掲載している。ただし購入価格は需給と実offeringで決まるため、購入画面/APIの総前払額を最終見積もりとする。
+BF16 weightは約19.3 GBで、24 GB GPUに約4.7 GB残る計算だが実機保証ではない。短いprompt・batch size 1でpreflightし、offloadまたはOOMなら条件を変えず停止する。
 
 ## 時間・費用上限
 
-### 作業時間
-
-| Phase | 時間上限 | 完了条件 |
+| Phase | 上限 | 完了条件 |
 |---|---:|---|
-| instance launch、driver/依存導入、無料検査 | 45分 | `check-config`、unit test、mock比較がすべて成功 |
-| pinned artifact download、model load preflight | 45分 | revision一致、単一GPU BF16 load、offloadなし、十分な空きdiskを確認 |
-| `baseline-01` | 60分 | completed manifest、100 predictions、metricを保存 |
-| `baseline-02` | 60分 | 同一環境でcompleted manifest、100 predictions、metricを保存 |
-| compare、artifact退避、instance/EBS削除 | 30分 | 比較結果を保存し、instance terminateとEBS削除を確認 |
-| **作業上限** | **4時間** | 超過見込みなら処理を停止しresourceを削除 |
+| launch、driver/依存、無料検査 | 45分 | check-config、unit test、mock比較成功 |
+| download、revision検査、load preflight | 45分 | 単一GPU BF16、offloadなし、disk余裕確認 |
+| `baseline-01` | 45分 | completed manifest、100 predictions |
+| `baseline-02` | 45分 | 同一環境のcompleted manifest、100 predictions |
+| compare、退避、terminate・削除 | 30分 | 比較保存、instance/EBS削除確認 |
+| **作業上限** | **4時間** | 超過見込みなら停止してresource削除 |
 
-Capacity Block自体は24時間予約するが、余った時間を追加run、別model、別条件へ転用しない。instanceは作業終了後すぐterminateする。早期terminateしても前払いの予約料金は返金されない。
-
-### 予算
-
-| 項目 | 計算 | 見積額 |
-|---|---:|---:|
-| Capacity Block reservation | $5.191 x 24 hours x 1 instance | $124.58 |
-| gp3 100 GBを24時間 | $0.08/GB-month x 100 / 30 | $0.27 |
-| 予備枠 | offering差、少量の転送・artifact保管等 | $15.15 |
-| **承認を求める絶対上限** |  | **$140.00** |
-
-- Linux以外のOS料金、tax、為替手数料は上表に含めない。これらを含めてAWS購入確認画面の支払額が$140を超える場合は購入しない
-- AWSのinbound転送や実料金を「無料」と仮定して予算を使い切らない。未見積もりの有料項目が表示された場合は開始せず再見積もりする
-- gp3単価はUS East (N. Virginia)のAWS公式例に基づく。EBSは使用後に必ず削除する
-- Capacity Blockの掲載単価は購入時まで保証されない。実offeringの前払額、開始・終了時刻、AZを提示して最終承認を得る
+参考単価$0.9776/hourなら4時間のcomputeは$3.91。gp3 100 GBを4時間保持する概算は約$0.04である。単価差、少量の転送・artifact保管、終了処理の余裕を含め、**tax・為替手数料込み絶対上限を$8.00**とする。実行直前の見積もりが上限を超える場合は起動しない。
 
 ## 承認ゲート
 
-次の順番を崩さない。
+1. HumanがQwen3.5-9Bをprimaryとして採用する
+2. AWS accountでG-family On-Demand quota、`g6.2xlarge` availability、Linux単価を検索だけ行う
+3. PR #31またはIssue #30へAZ、単価、4時間/$8上限、停止条件、実行担当者を提示する
+4. 記名Humanが明示承認する
+5. 承認内容と一致する場合だけinstanceを起動する
 
-1. Reviewer/Humanが候補比較を確認し、Qwen3.8-27Bをprimary baselineとして採用する
-2. AWS accountで`p5.4xlarge` x1・1日のofferingを**検索だけ**行い、offering ID、AZ、開始・終了時刻、前払額、失効条件を記録する
-3. PR #31またはIssue #30へ、実offeringと本書の4時間作業上限・$140絶対上限・停止条件・実行担当者を提示する
-4. 記名されたHumanが購入を明示承認する
-5. 承認対象とofferingが完全一致する場合だけ購入する
+## 実行前ゲートと停止条件
 
-offering検索は課金を発生させないが、購入操作は即時の前払いにつながりキャンセルできない。Codexが操作可能でも、明示承認前に購入APIを呼ばない。
+実行commitがreview済みかつcleanで、削除担当者・artifact退避先・quota・AMI・IAM・security groupが準備済みであることを確認する。次のいずれかで新phaseへ進まず、manifest/logを退避してinstanceとEBSを削除する。
 
-## 実行前ゲート
+- instance、GPU、VRAM、region/AZ、単価が承認内容と異なる
+- model/dataset revision、contract SHA、依存、commitが固定値と異なる
+- CUDA/BF16が使えない、単一L4に配置されない、offloadまたはOOMが発生する
+- local NVMe空きが開始時100 GB未満、download後50 GB未満
+- unit test、mock比較、1回目runのいずれかが失敗する
+- launchから4時間、phase上限、総額$8の到達が見込まれる
+- 未見積もりの有料resource、または2 run間の環境変化がある
 
-購入後も次をすべて満たすまでbaseline推論を始めない。
+OOM時に複数GPU、CPU offload、FP16、FP8、量子化へ自動変更しない。条件変更は別decisionとして再レビューする。
 
-1. 実行対象commitがreview済みで、作業ツリーがcleanである
-2. Capacity Blockのregion、AZ、instance type、台数、時刻、料金が承認内容と一致する
-3. 実行担当者がinstanceとEBSを削除でき、AWS Billing/Cost Managementを確認できる
-4. artifact退避先と、secret/private host情報を含まないことの確認方法を決めている
-5. account quota、Hugging Faceからのdownload、AMI、IAM、security groupが準備済みである
+## 削除・課金停止
 
-## 停止条件
+起動を承認された記名Humanを、instance、EBS、snapshot、Elastic IP等の削除と課金確認の最終責任者とする。
 
-以下のいずれかで新しいphaseへ進まず、可能なmanifest/logを退避してinstanceとEBSを削除する。
+1. artifactを退避しsecret/private host情報がないか確認
+2. instanceをterminateし`terminated`を確認
+3. rootを含むEBS、snapshot、Elastic IP、NAT Gateway等の残存を確認して不要分を削除
+4. Billing/Cost Managementで継続課金resourceが0件であることを確認
+5. 実時間、概算額、resource ID、削除時刻をPR/Issueへ記録
 
-- instance type、GPU型・枚数・VRAM、MIG状態、region/AZが承認内容と一致しない
-- modelまたはdataset revision、contract SHA、依存version、実行commitが固定値と一致しない
-- CUDA GPUまたはBF16が利用できない
-- modelがH100だけに配置されず、CPU/disk offloadが発生する、またはmodel loadがOOMになる
-- local NVMeの空きが開始時200 GB未満、またはdownload後100 GB未満になる
-- unit test、mock比較、1回目のbaseline runのいずれかが失敗する
-- instance launchから4時間、各phaseの時間上限、または総額$140のいずれかへ到達する見込みになる
-- AWS画面に未見積もりの有料resourceまたは追加料金が現れる
-- 2 run間でGPU、driver、CUDA、依存、commit、contractが変化する
+## 一次情報
 
-OOM時に複数GPU、CPU offload、FP16、FP8、量子化へ切り替えない。それらはbaseline条件を変えるため、失敗manifestと実測peak情報を提示してmodel選定または構成判断へ戻る。2 runの予測不一致は再現性結果として保存し、結果を合わせるための恣意的な再試行は行わない。
-
-## 終了・削除責任
-
-Capacity Blockを購入する**記名済みHuman実行担当者**を、instance、EBS、snapshot、Elastic IP等の付随resource削除と課金確認の最終責任者とする。Capacity Block予約自体は早期キャンセルできず、期限まで残る。
-
-終了・失敗・中断のいずれでも、次の順で処理しIssue #30へ記録する。
-
-1. manifest、predictions、比較結果、必要な失敗logを永続先へ退避する
-2. artifactにtoken、credential、account ID、private host情報がないことを確認する
-3. EC2 instanceをterminateする
-4. rootを含むEBS volume、snapshot、Elastic IP、不要なsecurity group等を削除または解放する
-5. EC2 consoleとBilling/Cost Managementで、Capacity Block以外の継続課金resourceが0件であることを確認する
-6. 実時間、予約前払額、付随費用、削除確認、artifact pathをIssueコメントへ記録する
-
-local NVMeのartifactはinstance terminateで失われるため、退避確認を先に行う。instanceのstopだけではEBSやElastic IPの課金が残り得るため、停止ではなくterminateと付随resourceの削除を確認する。
-
-## AWS一次情報
-
-- [EC2 P5 instance details](https://aws.amazon.com/ec2/instance-types/p5/): `p5.4xlarge`のH100、host memory、local NVMe
-- [Accelerated instance specifications](https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html): GPU数とGPU memory
-- [Capacity Blocks pricing](https://aws.amazon.com/ec2/capacityblocks/pricing/): 掲載単価、前払い料金の説明
-- [How Capacity Blocks work](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-blocks-how.html): durationと終了前の自動terminate
-- [Find and purchase Capacity Blocks](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-blocks-purchase.html): offering検索、1日単位、購入後キャンセル不可
-- [Capacity Blocks pricing and billing](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/capacity-blocks-pricing-billing.html): 需給連動、購入時前払い
-- [Amazon EBS pricing](https://aws.amazon.com/ebs/pricing/): gp3の課金方法とUS Eastの例
+- [EC2 G6 instances](https://aws.amazon.com/ec2/instance-types/g6/): L4 24 GB
+- [EC2 accelerated instance specifications](https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html): `g6.2xlarge`の8 vCPU、32 GiB、L4、NVMe
+- [EC2 On-Demand](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-on-demand-instances.html): 秒課金、60秒最低、前払いなし
+- [EC2 On-Demand pricing](https://aws.amazon.com/ec2/pricing/on-demand/): 起動直前に再確認する単価
+- [EBS pricing](https://aws.amazon.com/ebs/pricing/): gp3の時間比例課金
+- [EC2 Spot best practices](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-best-practices.html): 初回でSpotを使わない根拠

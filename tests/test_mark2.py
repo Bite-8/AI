@@ -10,6 +10,9 @@ from mark2.config import read_config, validate_config
 class ConfigTests(unittest.TestCase):
     def test_default_contract_is_valid_and_immutable(self):
         config = read_config(run.DEFAULT_CONFIG)
+        self.assertEqual(run.DEFAULT_CONFIG.name, "qwen35_9b_mmlu.json")
+        self.assertEqual(config["model"]["id"], "Qwen/Qwen3.5-9B")
+        self.assertEqual(config["model"]["revision"], "c202236235762e1c871ad0ccb60c8ee5ba337b9a")
         self.assertEqual(len(config["model"]["revision"]), 40)
         self.assertEqual(len(config["dataset"]["revision"]), 40)
         self.assertFalse(config["generation"]["do_sample"])
