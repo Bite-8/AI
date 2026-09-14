@@ -5,7 +5,7 @@
 ## 現在の構成
 
 - [`mark2/`](mark2/): 個人研究向けprimary候補Qwen3.5-9Bを固定条件で検証するbaseline評価ハーネス
-- [`docs/mark2/`](docs/mark2/): baseline選定、評価契約、実行手順、結果
+- [`docs/mark2/README.md`](docs/mark2/README.md): Mark2で現在確認してほしい提案、費用、評価条件、実行手順、結果
 - [`prototypes/numpy_transformer/`](prototypes/numpy_transformer/): 完了済みMark1の教材用NumPy Transformer
 
 ## Mark2 baseline
@@ -25,4 +25,4 @@ python3 -m mark2.run run --backend mock --run-id mock-2
 python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 ```
 
-実機baselineの前提、コマンド、承認手順は [`docs/mark2/RUNNING.md`](docs/mark2/RUNNING.md)、AWS有料GPUの構成・費用上限・停止条件は [`docs/mark2/PAID_GPU_PLAN.md`](docs/mark2/PAID_GPU_PLAN.md)、候補比較とモデル選定状況は [`docs/mark2/BASELINE_DECISION.md`](docs/mark2/BASELINE_DECISION.md)、結果の区分は [`docs/mark2/RESULTS.md`](docs/mark2/RESULTS.md) に記録します。
+モデル選定と有料実行は未承認です。判断に必要な情報と実機baselineの手順は [`docs/mark2/README.md`](docs/mark2/README.md) に集約しています。
