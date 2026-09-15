@@ -1,12 +1,12 @@
-# Mark2 baseline proposal
+# Mark2 baseline decision and execution plan
 
-この資料だけを確認すれば、現在の提案、選定理由、AWS東京リージョンでの費用、承認後の実行方法が分かるように情報を集約している。細かな変更経緯はgitとPRの履歴を参照する。
+この資料だけを確認すれば、採用したbaseline、選定理由、AWS東京リージョンでの費用、実行前の確認事項と実行方法が分かるように情報を集約している。細かな変更経緯はgitとPRの履歴を参照する。
 
-## 現在判断してほしいこと
+## 採用したprimary baseline
 
-個人研究のprimary baselineとして、`Qwen/Qwen3.5-9B`を採用することを提案する。現時点では**提案中であり、未採用・未実行**である。
+個人研究のprimary baselineとして、`Qwen/Qwen3.5-9B`を採用する。モデル選定と有料実行方針は2026-09-15にPR #31でHuman承認された。モデルは**採用済み、実機評価は未実行**である。
 
-採用を提案する理由は次のとおり。
+採用理由は次のとおり。
 
 - 公開重みかつApache-2.0で、内部componentを変更する実験ができる
 - 公式公表値はMMLU-Pro 82.5、GPQA Diamond 81.7で、小型ながら比較対象として十分に強い候補である
@@ -49,7 +49,7 @@ On-Demand単価は変わり得るため、起動直前にAWS accountで東京リ
 
 ## 固定する評価条件
 
-機械可読なsource of truthは [`mark2/configs/qwen35_9b_mmlu.json`](../../mark2/configs/qwen35_9b_mmlu.json) であり、モデルが採用されるまではcandidate contractとして扱う。
+機械可読なsource of truthは [`mark2/configs/qwen35_9b_mmlu.json`](../../mark2/configs/qwen35_9b_mmlu.json) である。
 
 - Model: `Qwen/Qwen3.5-9B` revision `c202236235762e1c871ad0ccb60c8ee5ba337b9a`
 - Dataset: `cais/mmlu` revision `c30699e8356da336a370243923dbaf21066bb9fe`、`all/test`
@@ -98,6 +98,7 @@ python3 -m mark2.run compare \
 ## 現在の結果
 
 - 設定検査・mock実行・artifact分離・失敗記録・再現比較: 自動テスト済み
+- Qwen3.5-9Bのprimary baseline採用: **Human承認済み**（PR #31）
 - Qwen3.5-9B実機run: **未実行**
 - L4 24 GBでのload、所要時間、peak memory、独立2 runの一致: **未検証**
 
