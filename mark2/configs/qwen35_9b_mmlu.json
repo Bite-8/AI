@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "model": {
+    "id": "Qwen/Qwen3.5-9B",
+    "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+    "license": "Apache-2.0",
+    "dtype": "bfloat16",
+    "quantization": null,
+    "trust_remote_code": false,
+    "class": "AutoModelForMultimodalLM"
+  },
+  "dataset": {
+    "id": "cais/mmlu",
+    "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+    "config": "all",
+    "split": "test",
+    "sample_size": 100,
+    "selection": "sha256-question-order-v1"
+  },
+  "prompt": {
+    "template": "Answer this multiple-choice question. Reply with only one letter: A, B, C, or D.\n\n{question}\n\n{choices}\n\nAnswer:",
+    "chat_template": true,
+    "enable_thinking": false
+  },
+  "generation": {
+    "max_input_tokens": 2048,
+    "max_new_tokens": 4,
+    "do_sample": false,
+    "num_beams": 1,
+    "seed": 20260913
+  },
+  "metric": {
+    "name": "exact_match_accuracy",
+    "parser": "first_standalone_A_D",
+    "unparseable": "incorrect",
+    "reproducibility": {
+      "max_accuracy_delta": 0.0,
+      "require_identical_predictions": true
+    }
+  }
+}
