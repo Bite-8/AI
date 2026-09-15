@@ -48,6 +48,17 @@ def render_prompt(row: dict[str, Any], template: str) -> str:
     return template.format(question=row["question"], choices=choices)
 
 
+def tokenize_prompt(tokenizer: Any, prompt: str) -> Any:
+    return tokenizer.apply_chat_template(
+        [{"role": "user", "content": prompt}],
+        tokenize=True,
+        add_generation_prompt=True,
+        return_dict=True,
+        return_tensors="pt",
+        enable_thinking=False,
+    )
+
+
 def parse_answer(text: str) -> str | None:
     match = ANSWER.search(text)
     return match.group(1).upper() if match else None
@@ -94,7 +105,7 @@ class TransformersBackend:
         try:
             import torch
             from datasets import load_dataset
-            from transformers import AutoModelForMultimodalLM, AutoProcessor
+            from transformers import AutoModelForMultimodalLM, AutoTokenizer
         except ImportError as exc:
             raise RuntimeError("install the exact versions in mark2/requirements.txt") from exc
         if not torch.cuda.is_available():
@@ -136,8 +147,11 @@ class TransformersBackend:
             "revision": model_cfg["revision"],
             "trust_remote_code": model_cfg["trust_remote_code"],
         }
-        processor = AutoProcessor.from_pretrained(model_cfg["id"], **kwargs)
-        chat_template = processor.get_chat_template()
+        # MMLU is text-only. Loading the tokenizer directly keeps this runner
+        # independent of torchvision/Pillow, which AutoProcessor would require
+        # for the model's unused vision path.
+        tokenizer = AutoTokenizer.from_pretrained(model_cfg["id"], **kwargs)
+        chat_template = tokenizer.get_chat_template()
         (run_dir / "chat_template.txt").write_text(chat_template, encoding="utf-8")
         manifest["chat_template_sha256"] = hashlib.sha256(chat_template.encode("utf-8")).hexdigest()
         for index in range(torch.cuda.device_count()):
@@ -155,15 +169,7 @@ class TransformersBackend:
         predictions = []
         for index, row in enumerate(rows):
             prompt = render_prompt(row, config["prompt"]["template"])
-            messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
-            inputs = processor.apply_chat_template(
-                messages,
-                tokenize=True,
-                add_generation_prompt=True,
-                return_dict=True,
-                return_tensors="pt",
-                enable_thinking=False,
-            )
+            inputs = tokenize_prompt(tokenizer, prompt)
             input_length = inputs["input_ids"].shape[-1]
             if input_length > generation["max_input_tokens"]:
                 raise ValueError(
@@ -184,7 +190,7 @@ class TransformersBackend:
             torch.cuda.synchronize()
             elapsed = time.perf_counter() - started
             output_ids = output[0, input_length:]
-            output_text = processor.decode(output_ids, skip_special_tokens=True)
+            output_text = tokenizer.decode(output_ids, skip_special_tokens=True)
             prediction = make_prediction(row, output_text, elapsed)
             prediction["index"] = index
             prediction["input_tokens"] = int(input_length)

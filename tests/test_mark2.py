@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mark2 import run
 from mark2.config import read_config, validate_config
@@ -74,6 +75,54 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(manifest["status"], "failed")
             self.assertEqual(manifest["error"]["type"], "RuntimeError")
             self.assertTrue(manifest["partial_marker"])
+
+
+class TransformersBackendTests(unittest.TestCase):
+    def test_text_prompt_uses_chat_template_without_vision_content(self):
+        class FakeTokenizer:
+            def apply_chat_template(self, messages, **kwargs):
+                self.messages = messages
+                self.kwargs = kwargs
+                return {"input_ids": "tokenized"}
+
+        tokenizer = FakeTokenizer()
+        result = run.tokenize_prompt(tokenizer, "question")
+        self.assertEqual(tokenizer.messages, [{"role": "user", "content": "question"}])
+        self.assertEqual(
+            tokenizer.kwargs,
+            {
+                "tokenize": True,
+                "add_generation_prompt": True,
+                "return_dict": True,
+                "return_tensors": "pt",
+                "enable_thinking": False,
+            },
+        )
+        self.assertEqual(result, {"input_ids": "tokenized"})
+
+    def test_text_only_runner_imports_tokenizer_without_vision_processor(self):
+        class FakeTorch:
+            class cuda:
+                @staticmethod
+                def is_available():
+                    return False
+
+        fake_modules = {
+            "torch": FakeTorch,
+            "datasets": type("FakeDatasets", (), {"load_dataset": None}),
+            "transformers": type(
+                "FakeTransformers",
+                (),
+                {
+                    "AutoModelForMultimodalLM": object,
+                    "AutoTokenizer": object,
+                },
+            ),
+        }
+        config = read_config(run.DEFAULT_CONFIG)
+        with tempfile.TemporaryDirectory() as folder, patch.dict("sys.modules", fake_modules):
+            with self.assertRaisesRegex(RuntimeError, "CUDA is required"):
+                run.TransformersBackend().run(config, {}, Path(folder))
 
 
 if __name__ == "__main__":
