@@ -1,12 +1,12 @@
-# Mark2 baseline proposal
+# Mark2 baseline decision and execution plan
 
-この資料だけを確認すれば、現在の提案、選定理由、AWS東京リージョンでの費用、承認後の実行方法が分かるように情報を集約している。細かな変更経緯はgitとPRの履歴を参照する。
+この資料だけを確認すれば、採用したbaseline、選定理由、AWS東京リージョンでの費用、実行前の確認事項と実行方法が分かるように情報を集約している。細かな変更経緯はgitとPRの履歴を参照する。
 
-## 現在判断してほしいこと
+## 採用したprimary baseline
 
-個人研究のprimary baselineとして、`Qwen/Qwen3.5-9B`を採用することを提案する。現時点では**提案中であり、未採用・未実行**である。
+個人研究のprimary baselineとして、`Qwen/Qwen3.5-9B`を採用する。モデル選定と有料実行方針は2026-09-15にPR #31でHuman承認された。モデルは**採用済み、実機評価は未実行**である。
 
-採用を提案する理由は次のとおり。
+採用理由は次のとおり。
 
 - 公開重みかつApache-2.0で、内部componentを変更する実験ができる
 - 公式公表値はMMLU-Pro 82.5、GPQA Diamond 81.7で、小型ながら比較対象として十分に強い候補である
@@ -25,9 +25,9 @@
 
 weight容量は2026-09-13にpinned Hugging Face repository metadataから確認したtensor storageで、KV cache、activation、CUDA context等は含まない。provider公表benchmarkは条件がこのrepositoryのpilotと異なるため、能力帯の確認にだけ使う。
 
-## AWS東京リージョンでの費用案
+## AWS東京リージョンでの実行計画と費用
 
-モデル採用後の初回実機runには、東京リージョン（`ap-northeast-1`）のEC2 Linux On-Demand `g6.2xlarge`を提案する。
+初回実機runは、東京リージョン（`ap-northeast-1`）のEC2 Linux On-Demand `g6.2xlarge`で行う。東京リージョンの使用は2026-09-15にPR #31でHuman承認済みであり、料金調査だけでは確定できない事項ではない。Availability Zoneは起動直前にaccount上の提供状況を確認して決める。東京で条件を満たせない場合も別regionへ自動変更せず、停止して再承認を求める。
 
 | 項目 | 提案 |
 |---|---|
@@ -35,21 +35,36 @@ weight容量は2026-09-13にpinned Hugging Face repository metadataから確認�
 | Host / local storage | 8 vCPU、32 GiB RAM、450 GB NVMe |
 | Root volume | 暗号化gp3 100 GB、削除時にinstanceとともに削除 |
 | 数値条件 | BF16、量子化なし、TF32なし、CPU/disk offloadなし |
-| On-Demand参考単価 | **$1.4178/hour**（2026-09-14確認） |
+| On-Demand単価 | **$1.41781/hour**（2026-09-21 AWS Price List確認） |
 | 作業上限 | **4時間** |
-| Compute概算 | **$5.67**（$1.4178 x 4時間） |
-| 承認依頼額 | **$10.00上限**（EBS、少量の転送、tax・為替手数料の余裕を含む） |
+| AWS利用料概算 | **$5.74**（EC2、gp3、Public IPv4。税別） |
+| 承認済み上限 | **$10.00**（tax・為替手数料と端数の余裕を含む） |
 
-On-Demand単価は変わり得るため、起動直前にAWS accountで東京リージョンの実単価、利用可能AZ、G-family quotaを検索し、PRに提示する。見積もりが$10を超える場合は起動せず、再承認を求める。初回は中断による環境差を避けるためSpotを使わない。
+使う課金resourceと内訳は次のとおり。月額は比較しやすいよう730時間連続利用で換算した値であり、実際に1か月動かす計画ではない。gp3の4時間額は730時間月として按分している。
 
-承認は二段階に分ける。
+| 課金resource | 数量・単価 | 4時間上限の概算 | 730時間の月額換算 |
+|---|---:|---:|---:|
+| EC2 `g6.2xlarge` Linux On-Demand | 1台、$1.41781/hour | $5.67 | $1,035.00 |
+| EBS gp3 root volume | 100 GB、$0.096/GB-month、baseline 3,000 IOPS / 125 MB/s | $0.05 | $9.60 |
+| Public IPv4 | 1 address、$0.005/hour | $0.02 | $3.65 |
+| Instance store NVMe | 450 GB、instance料金に含む | $0.00 | $0.00 |
+| Internet data transfer | model downloadは受信のため$0。artifact送信はaccount全体の月間100 GB無料枠内を想定 | $0.00見込み | 利用量とaccount全体の使用状況による |
+| **合計** |  | **$5.74** | **$1,048.25 + 無料枠超過分** |
+
+日本の消費税10%が全額にかかる単純な保守計算でも4時間は約$6.32で、承認済み$10上限内である。実際の請求はbilling address、為替、account全体の無料枠使用状況に依存する。NAT Gateway、Load Balancer、EBS snapshot、Elastic IP、追加EBS、長期保存用S3は使用しない。VPC、Security Group、Internet Gateway、IAMにはこの最小構成で追加時間料金を見込まない。
+
+単価は変わり得るため、起動直前にAWS accountで東京リージョンの実単価、利用可能AZ、G-family quotaを検索し、PRに提示する。現在の実行roleではAZとquotaを参照する権限がないため、この2点は未確認である。見積もりが$10を超える場合は起動せず、再承認を求める。初回は中断による環境差を避けるためSpotを使わない。
+
+PR #31では次の二段階が承認済みである。
 
 1. `Qwen/Qwen3.5-9B`をprimary baselineとして採用する
-2. 採用後、実単価・AZ・4時間/$10上限・停止条件・実行担当者を確認し、有料実行を明示承認する
+2. 東京リージョン、4時間/$10上限、停止条件に従って有料実行する
+
+有料resourceはまだ作成していない。起動前に、未確認の実単価・AZ・quotaと実行担当者をPRへ記録し、承認済み条件をすべて満たすことを確認する。
 
 ## 固定する評価条件
 
-機械可読なsource of truthは [`mark2/configs/qwen35_9b_mmlu.json`](../../mark2/configs/qwen35_9b_mmlu.json) であり、モデルが採用されるまではcandidate contractとして扱う。
+機械可読なsource of truthは [`mark2/configs/qwen35_9b_mmlu.json`](../../mark2/configs/qwen35_9b_mmlu.json) である。
 
 - Model: `Qwen/Qwen3.5-9B` revision `c202236235762e1c871ad0ccb60c8ee5ba337b9a`
 - Dataset: `cais/mmlu` revision `c30699e8356da336a370243923dbaf21066bb9fe`、`all/test`
@@ -98,6 +113,7 @@ python3 -m mark2.run compare \
 ## 現在の結果
 
 - 設定検査・mock実行・artifact分離・失敗記録・再現比較: 自動テスト済み
+- Qwen3.5-9Bのprimary baseline採用: **Human承認済み**（PR #31）
 - Qwen3.5-9B実機run: **未実行**
 - L4 24 GBでのload、所要時間、peak memory、独立2 runの一致: **未検証**
 
@@ -109,4 +125,7 @@ python3 -m mark2.run compare \
 - [Amazon EC2 G6 instances](https://aws.amazon.com/ec2/instance-types/g6/)
 - [Amazon EC2 accelerated instance specifications](https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html)
 - [Amazon EC2 On-Demand pricing](https://aws.amazon.com/ec2/pricing/on-demand/)
+- [AWS Price List Bulk API: EC2 Tokyo](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/ap-northeast-1/index.csv)
+- [Amazon EBS pricing](https://aws.amazon.com/ebs/pricing/)
+- [Amazon VPC pricing](https://aws.amazon.com/vpc/pricing/)
 - [AWS Pricing Calculator](https://calculator.aws/)

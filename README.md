@@ -4,8 +4,8 @@
 
 ## 現在の構成
 
-- [`mark2/`](mark2/): 個人研究向けprimary候補Qwen3.5-9Bを固定条件で検証するbaseline評価ハーネス
-- [`docs/mark2/README.md`](docs/mark2/README.md): Mark2で現在確認してほしい提案、費用、評価条件、実行手順、結果
+- [`mark2/`](mark2/): 個人研究向けprimary baseline Qwen3.5-9Bを固定条件で検証する評価ハーネス
+- [`docs/mark2/README.md`](docs/mark2/README.md): Mark2の選定記録、費用、評価条件、実行手順、結果
 - [`prototypes/numpy_transformer/`](prototypes/numpy_transformer/): 完了済みMark1の教材用NumPy Transformer
 
 ## Mark2 baseline
@@ -25,4 +25,4 @@ python3 -m mark2.run run --backend mock --run-id mock-2
 python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 ```
 
-モデル選定と有料実行は未承認です。判断に必要な情報と実機baselineの手順は [`docs/mark2/README.md`](docs/mark2/README.md) に集約しています。
+モデル選定は承認済みです。有料実行前の確認事項と実機baselineの手順は [`docs/mark2/README.md`](docs/mark2/README.md) に集約しています。
