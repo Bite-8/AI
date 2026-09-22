@@ -51,7 +51,7 @@ weight容量は2026-09-13にpinned Hugging Face repository metadataから確認�
 | Internet data transfer | model downloadは受信のため$0。artifact送信はaccount全体の月間100 GB無料枠内を想定 | $0.00見込み | 利用量とaccount全体の使用状況による |
 | **合計** |  | **$5.74** | **$1,048.25 + 無料枠超過分** |
 
-日本の消費税10%が全額にかかる単純な保守計算でも4時間は約$6.32で、承認済み$10上限内である。実際の請求はbilling address、為替、account全体の無料枠使用状況に依存する。NAT Gateway、Load Balancer、EBS snapshot、Elastic IP、追加EBS、長期保存用S3は使用しない。VPC、Security Group、Internet Gateway、IAMにはこの最小構成で追加時間料金を見込まない。
+日本の消費税10%が全額にかかる単純な保守計算でも4時間は約$6.32で、承認済み$10上限内である。実際の請求はbilling address、為替、account全体の無料枠使用状況に依存する。NAT Gateway、Load Balancer、EBS snapshot、Elastic IP、追加EBS、長期保存用S3は使用しない。VPC、Security Group、Internet Gateway、IAM、SSM Session Manager（標準機能。VPC endpointを作らない構成）にはこの最小構成で追加時間料金を見込まない。
 
 単価は変わり得るため、起動直前にAWS accountで東京リージョンの実単価、利用可能AZ、G-family quotaを検索し、PRに提示する。現在の実行roleではAZとquotaを参照する権限がないため、この2点は未確認である。見積もりが$10を超える場合は起動せず、再承認を求める。初回は中断による環境差を避けるためSpotを使わない。
 
@@ -100,6 +100,34 @@ aws ec2 describe-images \
 
 照会結果が1件でない、Amazon所有と確認できない、G6非対応、または削除済みの場合は起動しない。勝手なrelease変更で解決せず、変更後のOS・kernel・driver・CUDAと理由をPRに提示してHumanの再確認を得る。2026-09-22現在、この実行roleには `ec2:DescribeImages` がないため、東京固有AMI IDは未確認である。
 
+### 実行環境の分離と接続方法
+
+実装・repository作業と、model実行は別のinstanceで行う。
+
+| 役割 | instance | 稼働 | 用途 |
+|---|---|---|---|
+| 実装環境 | 既存の開発用EC2（GPUなし） | 常用 | repository編集、commit、PR、起動前gate、GPU instanceの作成・接続・削除の操作元 |
+| 実行環境 | `g6.2xlarge` 1台 | runの間だけ | baseline 2 runの実行のみ。終了後terminateする |
+
+GPU instance上でrepositoryの実装作業は行わない。GPUは実行中だけ課金されるため、編集やreviewのために起動したままにせず、run終了後は同一構成で作り直す。
+
+接続は**SSM Session Manager**を第一手段とする。開発用EC2からAWS CLIでsessionを開始し、SSHのinbound portは開けない。
+
+| 観点 | SSM Session Manager（採用） | SSH（採用しない） |
+|---|---|---|
+| inbound | 不要。Security Groupのingressを0件にできる | TCP/22のingressが必要 |
+| 認証 | IAMのみ。instanceへ置く鍵がない | 鍵またはEC2 Instance Connectの鍵配布が必要 |
+| 送信元IP | 開発用EC2のglobal IP変動に依存しない | `/32` 許可の更新が必要 |
+| 監査 | CloudTrailにsession記録が残る | instance内のlogのみ |
+| 追加費用 | なし | なし |
+| 前提 | instance profileと開発用EC2 roleへのIAM権限、SSM endpointへのoutbound HTTPS | 鍵運用 |
+
+選定したBase DLAMIにはSSM Agent `3.3.4793.0` が同梱されているため、追加installは不要である。GPU instanceはpublic subnetでpublic IPv4とInternet Gatewayを使ってoutboundを取り、SSM endpointへもそこから到達する。VPC endpointやNAT Gatewayは作らない。
+
+artifactの回収は、SSMのport forwarding sessionをlocalの一時portからinstanceの22へ張り、そのtunnel越しに`scp`する。tunnelはSSM Agent内部で終端するため、Security Groupのingressは不要である。鍵はEC2 Instance Connectでsession直前に一時公開鍵を配布し、instanceへ永続鍵を置かない。
+
+SSMが利用できない場合は、勝手にSSHへ切り替えない。原因（instance profile未付与、権限不足、agent未起動、outbound不通）を記録して停止し、Humanの判断を待つ。
+
 ### EC2、storage、network
 
 | 項目 | 構成 |
@@ -111,8 +139,9 @@ aws ec2 describe-images \
 | Root EBS | gp3 100 GB、3,000 IOPS、125 MB/s、暗号化、`DeleteOnTermination=true` |
 | Instance store | 450 GB NVMe。DLAMIの `/opt/dlami/nvme` をmodel/dataset cacheと作業領域に使う |
 | Public address | 自動割当Public IPv4 x1。Elastic IPは作らない |
-| Security Group | このrun専用。SSH TCP/22のingressは実行担当者の現在のglobal IPv4 `/32` のみ。全世界公開しない |
-| 接続 | EC2 Instance Connectの一時公開鍵を優先し、永続key pairやrepository tokenをinstanceへ保存しない |
+| Security Group | このrun専用。inbound ruleは0件。outboundはHTTPSのみ許可する |
+| IAM instance profile | `AmazonSSMManagedInstanceCore` 相当の最小権限のみ。S3、EC2操作、その他のAWS API権限は付けない |
+| 接続 | 開発用EC2からのSSM Session Manager。artifact回収はSSM port forwarding越しの `scp`。永続key pairやrepository tokenをinstanceへ保存しない |
 | Outbound | model、dataset、Python package、repositoryの取得にHTTPSを使用。NAT Gateway、proxy、Load Balancerは作らない |
 | Instance metadata | IMDSv2必須、hop limit 1 |
 | 終了動作 | instance initiated shutdownをterminateに設定。起動から235分でshutdownするfallback timerも設定 |
@@ -120,7 +149,7 @@ aws ec2 describe-images \
 
 QwenとMMLUはpublicな固定revisionから取得するためHugging Face tokenは使わない。repositoryもpublic HTTPSでcloneする。instanceへAWS access key、GitHub token、その他のlong-lived secretを置かない。
 
-NVMeはinstance終了時に消える。run artifactは終了前にroot EBSへcopyし、実行担当者がSSH経由でlocalへ回収してhashを照合する。回収完了を確認するまでterminateしないが、4時間上限が優先される。時間切れが近い場合は取得済みの失敗manifestとlogだけを回収し、runを継続しない。S3、EBS snapshot、追加volumeは使わない。
+NVMeはinstance終了時に消える。run artifactは終了前にroot EBSへcopyし、実行担当者がSSM port forwarding越しの `scp` で開発用EC2へ回収してhashを照合する。回収完了を確認するまでterminateしないが、4時間上限が優先される。時間切れが近い場合は取得済みの失敗manifestとlogだけを回収し、runを継続しない。S3、EBS snapshot、追加volumeは使わない。
 
 ### 起動から削除までの手順
 
@@ -130,11 +159,13 @@ NVMeはinstance終了時に消える。run artifactは終了前にroot EBSへcop
    - `origin/main` の実行commitを固定し、working treeがcleanであることを記録する。
    - 上記release名から東京のAMI ID、owner、architecture、stateを確認する。
    - `g6.2xlarge` の提供AZ、On-Demand価格、G-family On-Demand vCPU quotaが起動条件を満たすことを確認する。
+   - GPU instanceへ付けるinstance profileと、開発用EC2 roleの `ssm:StartSession` 等のSSM権限が揃っていることを確認する。揃っていなければ起動しない。
    - 実行担当者、開始予定時刻、AMI ID、AZ、見積額をPRへ記録する。
    - 既存の4時間/$10上限、resource構成、停止条件から外れる場合は作成せず、Humanの再確認を待つ。
 2. **provision（開始から15分以内）**
    - 専用Security GroupとEC2 1台だけを作成し、AMI ID、instance ID、volume ID、public IPv4、起動時刻を記録する。
    - instance type、L4 x1、root EBS属性、IMDSv2、termination動作、fallback timerを照合する。
+   - Security Groupのinbound ruleが0件であることと、SSM Session Managerで接続できることを確認する。接続できなければSSHへ切り替えず停止する。
 3. **host検査（開始から30分以内）**
    - `cat /etc/os-release`、`uname -r`、`python3 --version`、`nvidia-smi`、`nvcc --version`、`lsblk`、`df -h` を保存する。
    - GPUがL4 24 GB x1でない、driver/CUDA/OSが上表と異なる、NVMe空きが100 GB未満なら停止する。
