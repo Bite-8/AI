@@ -1,6 +1,6 @@
 # Mark2 baseline decision and execution plan
 
-この資料だけを確認すれば、採用したbaseline、選定理由、AWS東京リージョンでの費用、実行前の確認事項と実行方法が分かるように情報を集約している。細かな変更経緯はgitとPRの履歴を参照する。
+この資料だけを確認すれば、採用したbaseline、選定理由、AWS東京リージョンでの費用、AMIとOSを含む実機構成、実行前の確認事項と実行方法が分かるように情報を集約している。細かな変更経緯はgitとPRの履歴を参照する。
 
 ## 採用したprimary baseline
 
@@ -62,6 +62,97 @@ PR #31では次の二段階が承認済みである。
 
 有料resourceはまだ作成していない。起動前に、未確認の実単価・AZ・quotaと実行担当者をPRへ記録し、承認済み条件をすべて満たすことを確認する。
 
+## 固定する実機構成
+
+### AMI、OS、driver
+
+初回実機runでは、AWS公式の次のBase DLAMI releaseを使用する。
+
+| 項目 | 固定値 |
+|---|---|
+| AMI release名 | `Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 24.04) 20260915` |
+| AMI提供者 | Amazon。起動前のimage照会でownerがAmazonであることを確認する |
+| Architecture | `x86_64` |
+| OS | Ubuntu 24.04.5 LTS |
+| Kernel | `7.0.0-1012-aws` |
+| System Python | `/usr/bin/python3.12` |
+| NVIDIA driver | `595.91.07`（OSS driver） |
+| Default CUDA | `13.2`（`/usr/local/cuda-13.2/`） |
+| 同梱CUDA | 12.8、12.9、13.0、13.2 |
+| SSM Agent | `3.3.4793.0` |
+| DLAMI上のNVMe mount先 | `/opt/dlami/nvme` |
+
+AWS公式release notesは、このreleaseがG6をsupportし、上記のOS・kernel・driver・CUDAを含むことを示している。通常のUbuntu AMIへdriverを後付けする案より、GPU driverとG6対応がAWSによって組み合わされたDLAMIを使う方が、4時間枠内のsetup失敗を減らせる。
+
+PyTorch同梱DLAMIは使わない。このrepositoryは `mark2/requirements.txt` でPyTorchを含むPython依存を固定しているため、frameworkを含まないBase DLAMI上に専用virtual environmentを作り、固定versionだけをinstallする。AMIのglobal Python環境へinstallせず、OS packageの一括upgradeとNVIDIA driver/CUDAの更新もrun前には行わない。
+
+AMI IDはregionごとに異なる。東京のIDを推測値で文書へ固定せず、起動直前に次の固定release名で照会し、実際に使用するIDと照会結果をPRへ記録する。`latest` parameterはreleaseが進むため起動指定には使わない。
+
+```bash
+aws ec2 describe-images \
+  --region ap-northeast-1 \
+  --owners amazon \
+  --filters \
+    'Name=name,Values=Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 24.04) 20260915' \
+    'Name=state,Values=available' \
+    'Name=architecture,Values=x86_64'
+```
+
+照会結果が1件でない、Amazon所有と確認できない、G6非対応、または削除済みの場合は起動しない。勝手なrelease変更で解決せず、変更後のOS・kernel・driver・CUDAと理由をPRに提示してHumanの再確認を得る。2026-09-22現在、この実行roleには `ec2:DescribeImages` がないため、東京固有AMI IDは未確認である。
+
+### EC2、storage、network
+
+| 項目 | 構成 |
+|---|---|
+| Region | `ap-northeast-1`（東京） |
+| Availability Zone | `g6.2xlarge` を提供するAZを起動直前に1つ選び、PRへ記録 |
+| Purchase option | Linux On-Demand。Spot、Capacity Reservation、Savings Planは使わない |
+| Instance | `g6.2xlarge`: 8 vCPU、32 GiB RAM、NVIDIA L4 24 GB x1 |
+| Root EBS | gp3 100 GB、3,000 IOPS、125 MB/s、暗号化、`DeleteOnTermination=true` |
+| Instance store | 450 GB NVMe。DLAMIの `/opt/dlami/nvme` をmodel/dataset cacheと作業領域に使う |
+| Public address | 自動割当Public IPv4 x1。Elastic IPは作らない |
+| Security Group | このrun専用。SSH TCP/22のingressは実行担当者の現在のglobal IPv4 `/32` のみ。全世界公開しない |
+| 接続 | EC2 Instance Connectの一時公開鍵を優先し、永続key pairやrepository tokenをinstanceへ保存しない |
+| Outbound | model、dataset、Python package、repositoryの取得にHTTPSを使用。NAT Gateway、proxy、Load Balancerは作らない |
+| Instance metadata | IMDSv2必須、hop limit 1 |
+| 終了動作 | instance initiated shutdownをterminateに設定。起動から235分でshutdownするfallback timerも設定 |
+| Tag | `Project=AI-Mark2`、`Purpose=baseline-validation`、`Issue=33`、`AutoDeleteAfter=<UTC>` |
+
+QwenとMMLUはpublicな固定revisionから取得するためHugging Face tokenは使わない。repositoryもpublic HTTPSでcloneする。instanceへAWS access key、GitHub token、その他のlong-lived secretを置かない。
+
+NVMeはinstance終了時に消える。run artifactは終了前にroot EBSへcopyし、実行担当者がSSH経由でlocalへ回収してhashを照合する。回収完了を確認するまでterminateしないが、4時間上限が優先される。時間切れが近い場合は取得済みの失敗manifestとlogだけを回収し、runを継続しない。S3、EBS snapshot、追加volumeは使わない。
+
+### 起動から削除までの手順
+
+有料resourceを作成する実行担当者は、次の順序を守る。
+
+1. **起動前gate**
+   - `origin/main` の実行commitを固定し、working treeがcleanであることを記録する。
+   - 上記release名から東京のAMI ID、owner、architecture、stateを確認する。
+   - `g6.2xlarge` の提供AZ、On-Demand価格、G-family On-Demand vCPU quotaが起動条件を満たすことを確認する。
+   - 実行担当者、開始予定時刻、AMI ID、AZ、見積額をPRへ記録する。
+   - 既存の4時間/$10上限、resource構成、停止条件から外れる場合は作成せず、Humanの再確認を待つ。
+2. **provision（開始から15分以内）**
+   - 専用Security GroupとEC2 1台だけを作成し、AMI ID、instance ID、volume ID、public IPv4、起動時刻を記録する。
+   - instance type、L4 x1、root EBS属性、IMDSv2、termination動作、fallback timerを照合する。
+3. **host検査（開始から30分以内）**
+   - `cat /etc/os-release`、`uname -r`、`python3 --version`、`nvidia-smi`、`nvcc --version`、`lsblk`、`df -h` を保存する。
+   - GPUがL4 24 GB x1でない、driver/CUDA/OSが上表と異なる、NVMe空きが100 GB未満なら停止する。
+4. **隔離環境と無料検査（開始から45分以内）**
+   - NVMe上へpublic repositoryをcloneして固定commitをcheckoutし、Python virtual environmentを作る。
+   - `mark2/requirements.txt` の固定依存をinstallし、実際のpackage versionを保存する。
+   - `check-config`、unit test、mock 2 runと比較を実行する。1つでも失敗したらweightをdownloadしない。
+5. **baseline 2 run**
+   - Hugging Face cacheとartifact作業先をNVMeに置き、固定revisionだけを取得する。
+   - `baseline-01`、`baseline-02` を順に実行し、再現比較を行う。各準備phase45分、各run45分の上限を維持する。
+   - OOMやoffload要求が出ても、instance追加、量子化、FP16、CPU/disk offloadへ変更しない。
+6. **回収と削除**
+   - manifest、predictions、比較結果、host検査logをroot EBSへ集約し、localへ回収してSHA-256を照合する。
+   - instanceをterminateし、EBS、snapshot、Elastic IP、Security Group等の課金・一時resourceが残っていないことを確認する。
+   - 終了時刻、実時間、概算額、artifact hash、resource削除結果をPRへ記録する。成功・失敗のどちらでも記録する。
+
+この手順を自動化するInfrastructure as Codeや起動scriptの実装、実際のresource作成、実機runはIssue #33の文書化範囲には含めない。Humanがこの構成を確認した後、#30の残作業として実行する。
+
 ## 固定する評価条件
 
 機械可読なsource of truthは [`mark2/configs/qwen35_9b_mmlu.json`](../../mark2/configs/qwen35_9b_mmlu.json) である。
@@ -114,6 +205,7 @@ python3 -m mark2.run compare \
 
 - 設定検査・mock実行・artifact分離・失敗記録・再現比較: 自動テスト済み
 - Qwen3.5-9Bのprimary baseline採用: **Human承認済み**（PR #31）
+- 実機のAMI・OS・network・storage・実行手順: **Human確認待ち**（Issue #33）
 - Qwen3.5-9B実機run: **未実行**
 - L4 24 GBでのload、所要時間、peak memory、独立2 runの一致: **未検証**
 
@@ -124,6 +216,8 @@ python3 -m mark2.run compare \
 - [Pinned MMLU dataset](https://huggingface.co/datasets/cais/mmlu/tree/c30699e8356da336a370243923dbaf21066bb9fe)
 - [Amazon EC2 G6 instances](https://aws.amazon.com/ec2/instance-types/g6/)
 - [Amazon EC2 accelerated instance specifications](https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html)
+- [Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 24.04) 20260915 release notes](https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-ami-gpubaseoss-ul2404-2026-09-16.html)
+- [Deep Learning Base GPU AMI (Ubuntu 24.04) release index and lookup methods](https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-x86-base-gpu-ami-ubuntu-24-04.html)
 - [Amazon EC2 On-Demand pricing](https://aws.amazon.com/ec2/pricing/on-demand/)
 - [AWS Price List Bulk API: EC2 Tokyo](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/ap-northeast-1/index.csv)
 - [Amazon EBS pricing](https://aws.amazon.com/ebs/pricing/)
