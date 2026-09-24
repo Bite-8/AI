@@ -26,3 +26,9 @@ python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 ```
 
 モデル選定は承認済みです。有料実行前の確認事項と実機baselineの手順は [`docs/mark2/README.md`](docs/mark2/README.md) に集約しています。
+
+## Copyright
+
+Copyright © 2026 Bite-8. All rights reserved.
+
+No license is granted for this source code.
