@@ -6,15 +6,21 @@ Tracking issue: [#37](https://github.com/Bite-8/AI/issues/37)
 
 ## 1. この文書の目的
 
-この文書は、Humanを通常のIssue作成、実装承認、PR review、修正確認、mergeから外し、AIが`GOAL.md`へ向かう開発loopを継続するための初期設計案である。
+この文書は、Humanを通常のIssue作成、実装承認、PR review、修正確認、mergeから外し、AIが`GOAL.md`へ向かう開発loopを継続するための**開発フロー案**である。
 
 ここでいうL4は製品一般の自律化levelではなく、このrepositoryにおけるAI駆動開発の自律化levelを表す便宜上の呼称とする。
 
-このPRでは方針を提案するだけで、Human gateの解除、GitHub ruleset変更、自動merge、有料resourceの操作は行わない。
+このPRで行うのは案の合意までである。Human gateの解除、GitHub ruleset変更、自動merge、有料resourceの操作は行わない。
 
-具体的にどのファイルをどう変更し、1回の定期実行がどう動くかは15章にまとめる。Shadow modeとportfolioは、15章の最小構成が実Taskで動いた後に具体化する。
+この文書では混同を避けるため、記述を次の3種類に分ける。
+
+- **現状**: 現在すでに存在する仕組み
+- **提案**: この文書で新しく導入を提案する仕組み
+- **将来候補**: 初期運用の結果を見て別途判断する仕組み
 
 ## 2. 背景と問題
+
+### 現状
 
 現在の定期実行promptは、次の2つのHuman gateを必須にしている。
 
@@ -23,573 +29,314 @@ Tracking issue: [#37](https://github.com/Bite-8/AI/issues/37)
 
 この方式は誤った変更を止めやすい一方、すべての通常作業でHumanの応答を必要とするため、Humanが開発速度の上限になる。
 
-一方で、Human gateを単純に削除してGoalだけを渡しても自律開発にはならない。過去の運用では、Goalから次の作業を一意に決められず、各Agentが「まだ検討されていないため実装できない」と判断して停止した。
+過去にHuman gateを外して`GOAL.md`だけを渡した運用では、Goalから次の作業を一意に決められず、Agentが「まだ検討されていないため実装できない」と判断して停止した。
 
-原因はGoalの不足というより、Humanが暗黙に担っていた次の機能が開発systemへ移されていなかったことにある。
+不足していたのは新しい管理systemではなく、Humanが暗黙に行っていた次の判断をAgentの手順へ移すことである。
 
-- 現在地点とGoalの差分を特定する
-- 候補作業を生成し、優先順位を付ける
-- 不明点を調査、実験、判断、escalationへ分類する
-- 作業開始条件と完了条件を定める
-- riskを分類する
-- review、修正、mergeの状態遷移を制御する
+- 現在地点とGoalの差分を確認する
+- 候補作業を比較し、次の1件を選ぶ
+- Issueへ目的、範囲、完了条件を書く
+- 実装とreviewを分離する
+- 通常変更とHuman判断が必要な変更を分ける
+- Issue、PR、CIの状態から次の行動を決める
 
-L4化の中心は、Human reviewをAI reviewへ置換することではなく、これらの制御を明示的な契約と検証可能な状態遷移へ移すことである。
+### 提案の中心
 
-## 3. 現在のrepository状態
+既存のIssueとPRをそのまま作業記録と状態管理に使う。Task Contract用JSON、portfolio、独自Controller、独自policy fileは初期構成へ追加しない。
+
+## 3. 現在のrepository状態と制約
 
 2026-09-25の調査時点では次の状態である。
 
-- Open Issueは#30、#33、tracking用の#37の3件
-- Open PRは#34の1件
-- PR #34にはHumanの`LGTM!`コメントがあるが、formal reviewは0件
-- PR #34にはstatus checkがなく、repositoryにもGitHub Actions workflowがない
-- `main`のrulesetはPR経由、branch削除禁止、non-fast-forward禁止を設定している
-- required status checkは設定されていない
-- `GOAL.md`は研究の方向を示すが、現在地点、優先順位、作業選択規則、検証可能な完了条件までは定義していない
-- PR #34のbranchと`main`は分岐しており、`main`側にだけ6 commits、PR側にだけ3 commitsある
-- 実機baselineは未実行であり、Qwen3.5-9BのNVIDIA L4 GPU上でのload、実行時間、peak memory、独立2 runの一致は未検証
+- `docs/memo/prompt.md`に定期実行の作業選択順序がある
+- Issueに背景、目的、scope、完了条件、検証方法を書く運用がある
+- PRに変更内容と検証結果を書き、Humanがmergeする運用がある
+- GitHub Actions workflowとrequired status checkはない
+- `.github/CODEOWNERS`はGitHub設定、AI設定、`GOAL.md`を`@bara8383`のreview対象にしている
+- `GOAL.md`は研究の方向を示すが、現在地点から次の作業を選ぶ規則までは持たない
 
-したがって、現在はHuman gateをそのまま解除できる状態ではない。先にAIが担う判断契約と、決定論的なmerge gateを作る必要がある。
+### 3.1 変更してもHuman reviewが必須の範囲
 
-### 3.1 前提条件: CODEOWNERSとruleset
-
-`.github/CODEOWNERS`と`main-protect` ruleset（`require_code_owner_review: true`）により、次のpathを変更するPRはcode owner（`@bara8383`）のreviewが必須である。
+`.github/CODEOWNERS`と`main-protect` rulesetの`require_code_owner_review`により、次のpathは引き続きcode owner reviewを必須とする。
 
 - `/GOAL.md`
-- `/.github/`（workflow、CODEOWNERS、PR templateを含む）
-- `/.claude/`、`/.codex/`（Agent設定・prompt）
-- `**/CLAUDE.md`、`**/AGENTS.md`
+- `/.github/`
+- `/.claude/`
+- `/.codex/`
+- `**/CLAUDE.md`
+- `**/AGENTS.md`
 
-つまり、GitHub周りの設定とAI周りの設定はcode owner reviewを必須とする。この前提を設計へ次のように反映する。
+これはL4 workflowの例外ではなく外側の制約である。Agentが独自に同じ規則を再実装する必要はない。GitHub設定とAI設定を変更するPRは、通常コードのPRと同じ自律merge対象に含めない。
 
-1. GitHub設定とAI設定の変更は、L4移行後も常に`R2`であり、自律mergeの対象にしない。Risk classifierはこの一覧を別に持たず、`.github/CODEOWNERS`を直接読んで判定する（15.3）。
-2. L4 workflow本体（CI、定期実行prompt、Review Agent定義、`AGENTS.md`）はほぼすべてこのpathに入るため、workflowの実装PRはすべてcode owner reviewを経る。
-3. Controllerやvalidatorを置く`automation/`は現在のCODEOWNERSでは保護されない。Gateを緩める変更が`R1`として通らないよう、`/automation/l4/`と`/automation/policy.json`をCODEOWNERSへ追加する（15.2）。
-4. 現在のrulesetは`required_approving_review_count: 0`であり、CODEOWNERS対象外のpath（`mark2/`、`tests/`、`docs/`等）だけを変えるPRは、GitHub上はreviewなしでmergeできる。現在のHuman gateは定期実行promptの規約で成立しており、GitHub側では強制されていない。L4で自律merge対象にするのはこの範囲なので、ここはrequired status checkで決定論的に保護する必要がある。
+### 3.2 安全性を置く場所
+
+提案では安全性を1個の`policy.json`へ集約しない。
+
+| 制約 | 強制する場所 |
+|---|---|
+| GitHub・AI設定のowner review | `CODEOWNERS`とruleset |
+| Test、format、再現性検査 | GitHub Actions |
+| Secret、credential、課金resourceへの権限 | 実行環境の権限・sandbox |
+| Agentの作業順序と禁止事項 | `AGENTS.md`と定期実行prompt |
+| 作業の目的、scope、完了条件 | Issue |
+| 実装差分、検証結果、未解決事項 | PR |
+
+`AGENTS.md`は指示であり、権限境界の代わりではない。禁止操作は可能な限り実行環境とGitHub側でも実行不能にする。
 
 ## 4. 設計原則
 
-### 4.1 Humanは通常loopではなくpolicyを所有する
+### 4.1 Humanを通常loopの待ち状態にしない
 
-Humanの主な責務を次に限定する。
+通常の可逆なコード・test・文書変更は、Issue作成、実装、独立review、CI、mergeまでAgentが進める。HumanはGitHub・AI設定、Goal、費用、外部systemなど、あらかじめowner判断とした変更だけをreviewする。
 
-- Project Goalと方向性の決定
-- 成功条件、non-goal、risk policyの決定
-- AIへ委譲する権限、費用、時間の上限設定
-- 技術的証拠だけでは決められない価値判断
-- 不可逆または高riskな例外判断
+### 4.2 IssueとPRをsource of truthにする
 
-安全で可逆なrepository内の通常作業はAIへ委譲する。
+計画はIssue、実装はPR、機械検証はCIへ置く。同じ内容を別のJSONやportfolioへ複製しない。
 
-### 4.2 未知であること自体をblockerにしない
+### 4.3 未知を次の作業へ変換する
 
-「何をしたらよいか」「どれが正解か」が不明な場合、すぐHumanへ質問せず、事実調査、比較実験、可逆な推奨案の採用の順で解消する。
+不明点が事実なら調査、技術的な選択なら小さい比較実験、安全に決められない価値判断ならHuman escalationへ変換する。「未検討」で停止しない。
 
-### 4.3 LLMで判定する必要がないものはCIへ移す
+### 4.4 独立reviewと決定論的検査を分ける
 
-Test、format、schema、artifact整合、SHA一致など、決定論的に検証できる条件をReview Agentへ判断させない。
+Review subagentはGoal整合性、設計、回帰risk、test不足を確認する。Test、format、artifact整合など機械判定できるものはCIで確認する。
 
-### 4.4 Reviewとmerge制御を分離する
+### 4.5 WIPを1件に制限する
 
-Review Agentは問題の検出と判定を行う。retry回数、SHA binding、CI状態、risk policy、merge可否は決定論的なworkflowが管理する。
+Agentが進行させるopen PRは原則1件とする。定期実行は既存PRの修正・review・mergeを、新しいIssue作成より優先する。
 
-### 4.5 失敗した研究も成果物にする
+## 5. 提案する開発フロー
 
-期待した改善が出なかった仮説も、条件、artifact、結果、棄却判断を再利用可能な形で残せば完了として扱える。成功した仮説だけをmergeする運用にはしない。
-
-## 5. 初期Agent構成
-
-### 5.1 Main Agent
-
-責務はGoalへ向かって開発を前進させることである。
-
-- Repository、Issue、PR、test、artifactから現在状態を確認する
-- Goalとの差分から候補作業を生成する
-- 次のTask Contractを選択・作成する
-- 探索、計画、実装、検証、PR更新を行う
-- Review Agentの`FAIL`を修正する
-- merge後の状態を確認する
-
-Main Agentは、次の作業が明記されていないことだけを理由に停止しない。
-
-### 5.2 Review Agent
-
-責務はMain Agentによる誤った前進を検出することである。
-
-Main Agentの会話履歴を引き継がない新しいcontextで、repositoryと成果物を直接確認する。Review Agentはコードや文書を変更しない。
-
-Reviewは2回行う。
-
-1. Plan review: Task Contract、候補比較、Goalへの寄与、risk分類を確認する
-2. Diff review: 実装、test、scope、回帰risk、受け入れ条件を確認する
-
-出力は次のいずれかとする。
-
-- `PASS`: blocking findingがない
-- `FAIL`: repository内の修正で解消できるblocking findingがある
-- `ESCALATE`: Human専用判断が必要、または安全な修正方針を選べない
-
-各判定には、対象head SHA、blocking finding、non-blocking note、確認した検証を含める。
-
-### 5.3 決定論的Controller
-
-3人目のAgentは初期構成へ追加しない。代わりに、Main AgentとReview Agentが従う状態遷移をworkflowとして定義する。
+### 5.1 全体像
 
 ```text
-candidate
-  -> task-ready
-  -> plan-reviewed
-  -> implementing
-  -> local-verified
-  -> PR
-  -> diff-reviewed
-  -> CI-passed
-  -> policy-passed
-  -> mergeable
-  -> merged
-  -> post-merge-verified
+GOAL.mdとGitHubの現状を確認
+          ↓
+候補を比較し、Issueを1件作成
+          ↓
+Plan review subagent
+   FAIL ─→ Issueを修正 ─┐
+          ↓ PASS         │
+Issue番号からbranch作成  │
+          ↓              │
+実装・local test         │
+          ↓              │
+PR作成（Closes #N）      │
+          ↓              │
+CI + Diff review subagent
+   FAIL ─→ 同じPRを修正 ─┘
+          ↓ PASS
+CODEOWNERS対象か？
+  yes → Human review・merge待ち
+  no  → Agentがmerge
+          ↓
+Issueが自動close、次回runで次のgapを選ぶ
 ```
 
-Agentは必要な証拠がない状態を飛ばして次へ進めない。
+IssueはAgent同士のメモではない。Humanも含めて「なぜこの作業をするか」をreviewできる計画である。PRはそのIssueを実現した証拠である。
 
-Controllerは概念上の手順だけでなく、Phase 3までにMain/Reviewから分離した実行主体として実装する。権限境界は次のとおりとする。
+### 5.2 Issueの内容
 
-| 主体 | Repository read | Branch/PR write | Review判定 | Required check発行 | Merge | Ruleset/secret変更 |
-|---|---:|---:|---:|---:|---:|---:|
-| Main Agent | yes | local workspaceのみ。GitHub更新はControllerへ依頼 | no | no | no | no |
-| Review Agent | yes、read-only | no | yes | Controller経由 | no | no |
-| Controller | evidenceのみ | 限定writer経由でbranch/PR/stateを更新 | no | yes | yes | no |
-| Human administrator | yes | yes | 監査 | 設定 | 例外時 | yes |
+Agentが作るIssueには次を必須とする。
 
-Main AgentとReview AgentへGitHub write credentialを渡さない。Main Agentはlocal workspaceでpatchとcommit候補を作り、Controllerが公開する限定operationを通じてwriterへbranch、PR、commentの更新を依頼する。Controllerは任意のshellや汎用GitHub tokenをMainへ公開しない。
-
-同一repositoryでは、branchへのpushに必要な`Contents: write`がPR mergeにも利用できるため、「Mainは直接pushできるがmergeできない」というcredential設計にはしない。Controllerだけがwrite credentialを保持し、通常のbranch/PR更新とmergeを別のoperationとしてpolicy検証する。Merge operationはGitHub上のrequired checkとpolicyを再取得し、対象head SHAが一致する場合だけ実行する。
-
-Shadow期間は現在の実行環境のcredential制約上この分離を完全には強制できないため、Controllerはmerge判定だけを出し、実際のmergeはHumanが行う。Phase 3は限定writerとcredential分離の実装完了を前提とする。
-
-## 6. Task Contract
-
-IssueのHuman承認を、AIが作成しReview Agentが検証するTask Contractへ置き換える。
-
-Task Contractは最低限次を含む。
-
-- Goal trace: `GOAL.md`のどの差分を縮めるか
-- Current evidence: 現在何が確認済みか
-- Question or hypothesis: 今回解決する問い
-- Candidate tasks: 検討した候補
-- Selection rationale: なぜこの作業を先に行うか
-- Outcome: この作業で真にする状態
+- 背景と確認した現状
+- `GOAL.md`のどの差分を縮めるか
+- 候補として比較した作業と、この作業を先にする理由
+- 目的
 - Scope / out of scope
-- Acceptance criteria
-- Verification method
-- Failure or rejection condition
-- Risk class
-- Time and cost budget
-- Rollback method
-- Assumptions and unresolved questions
+- 完了条件
+- 検証方法
+- 既知のrisk、未解決事項
+- Human判断が必要な場合は、選択肢、推奨案、各案の影響
 
-CanonicalなTask Contractは、version管理された機械可読fileとしてbranchへ置く。想定配置は`automation/tasks/<task-id>.json`とする。新しい依存を増やさないため、schemaはJSON Schema fileではなく`automation/l4/contract.py`のvalidatorとして実装する（15.4）。IssueやPR本文は人間向けprojectionであり、source of truthにはしない。
+初期導入では`.github/ISSUE_TEMPLATE/autonomous-task.yml`を追加し、この項目をIssue formとして固定する。Task Contractの役割はこのIssue本文が担う。
 
-Controllerはcanonical JSONからSHA-256 digestを計算する。Plan review結果は少なくとも次を含む機械可読artifactとする。
+### 5.3 Issueの状態
 
-- Contract ID
-- Contract schema version
-- Contract digest
-- Reviewed contract commit SHA
-- Reviewer run ID
-- Verdict
-- Findings
-- Timestamp
+状態はIssueとPRから読み取る。別fileへ状態を保存しない。
 
-Contractを変更するとdigestが変わり、以前のPlan reviewは自動的に無効になる。Diff reviewもhead SHAへ結び付け、head更新後の以前の`PASS`を使用できないようにする。
+| 状態 | GitHub上の表現 | 次の行動 |
+|---|---|---|
+| 計画中 | open Issue、対応PRなし、Plan review未完了 | Plan reviewを行う |
+| 実装可能 | IssueへPlan review `PASS` commentあり | branchを作り実装する |
+| 実装中 | `Closes #N`を含むdraft PRあり | 実装を完了する |
+| review中 | ready for reviewのPRあり | CIとDiff reviewを行う |
+| 修正中 | failed CIまたはReview `FAIL`あり | 同じPRを修正する |
+| owner待ち | CODEOWNERS対象でchecks成功 | Human reviewを待つ |
+| merge可能 | CODEOWNERS対象外でchecks成功、Review `PASS` | Agentがmergeする |
+| 完了 | PR merge済み、Issue close済み | 次のgapを選ぶ |
+| blocked | Issueへ`BLOCKED` commentあり | 解除条件を確認する |
 
-Workflowの状態は、Git commit上のTask Contractと、head SHAへ結び付いたGitHub Check Runをsource of truthとする。Label、Issue本文、PR本文、commentだけから状態を進めない。ただしCheck Run発行を実装するまでのPhase 1では、review結果だけはmarker付きPR commentに記録し、`gate`がcontract digestとhead SHAの一致を検査したものに限って使う（15.5）。
+Labelは一覧性のために使ってよいが、正しさの判定をlabelだけに依存しない。PR、review、checkの実状態を毎回確認する。
 
-### 6.1 AI-maintained portfolio
+### 5.4 PRの内容
 
-> 導入時期: 15章のPhase 1構成が実Taskで動いた後に、具体的なfile形式と更新手順を別PRで提案する。以下は方向性だけを示す。
+`.github/pull_request_template.md`には次を置く。
 
-Human所有の長期Goalとは別に、AIが更新できる現在状態のportfolioを`automation/portfolio.json`へ置き、schemaで検査する。
+- `Closes #<Issue番号>`
+- Goalとの関係
+- 変更内容
+- Scope外の変更がないこと
+- 実行した検証と結果
+- 未検証事項、既知のrisk
+- CODEOWNERS対象pathの有無
+- Review subagentに特に確認してほしい点
 
-Portfolioは次を含む。
+新しいcommitをpushしたら、以前のDiff reviewは無効とし、最新headをreviewし直す。
 
-- Current milestoneと検証可能な完了条件
-- Goalとのgap
-- Candidate task
-- Dependency
-- `candidate` / `active` / `blocked` / `rejected` / `done`の状態
-- 優先順位と根拠
-- 根拠となるcommit、Issue、PR、artifact
-- 棄却理由と再検討条件
+## 6. 1回の定期実行で行うこと
 
-Main AgentはTask Contractを作る前にportfolioを更新し、Review Agentは候補漏れと優先順位を確認する。これにより、各実行が候補検討を最初からやり直したり、棄却済み案を理由なく再提案したりすることを防ぐ。
+### 6.1 起動方法
 
-`active`と`done`の実効状態はJSONの手動更新だけで決めず、Task IDに対応するopen PRと`main`へのmerge記録からControllerが導出する。Merge成功時にControllerはtask completion eventを記録してactive leaseを解放し、次のportfolio reconciliationで永続fileを`done`へ更新する。したがって、merge直後にportfolio fileの表示が一時的に`active`でも次の作業開始を妨げず、同じTaskの二重開始も許さない。
+定期実行serviceは、repositoryの最新`main`をcheckoutし、`.codex/prompts/l4-loop.md`をtask promptとしてCodexを1回起動する。実行間の専用memoryは持たせず、Issue、PR、comment、commit、checkを次回runの入力にする。
 
-現在の`GOAL.md`にはMark2全体の検証可能な完了条件が不足しているため、L4 loop開始前にHumanがGoal completion contractを承認する必要がある。AIはその範囲内でmilestoneとportfolioを更新できるが、Goal completion contract自体の変更は`R2`とする。
+概念上の起動commandは次の形とする。実際のscheduler固有設定とcredential設定はrepository外で管理する。
 
-## 7. 作業選択規則
-
-新しい作業を始める前に、次の順で既存作業を処理する。
-
-1. Open PRのfailed CIまたはblocking review
-2. Merge条件を満たしたopen PR
-3. 進行中のTask Contract
-4. Goal達成を妨げる最も近いgap
-
-候補作業が複数ある場合は、次の順で選ぶ。
-
-1. Goalとの差分を直接縮める
-2. 後続作業のblockerを解消する
-3. 情報利得が大きい
-4. 客観的に検証できる
-5. 小さくrollbackできる
-6. 費用と所要時間が小さい
-
-候補が存在する限り、Main Agentは1件を選ぶ。選択不能な場合も「未検討」とだけ報告せず、比較した候補、判断不能な一点、推奨案を含むdecision packetを作成する。
-
-## 8. 曖昧さの処理
-
-### 8.1 事実不足
-
-Repository、Issue、PR、実行結果、一次資料から調査する。
-
-### 8.2 技術的不確実性
-
-Test、benchmark、小さなprototypeで比較する。比較可能な問題を好みや印象だけで決めない。
-
-### 8.3 複数案があるが安全かつ可逆
-
-Goalへの寄与と作業選択規則からMain Agentが推奨案を選び、仮定、代替案、rollback方法を記録して進む。
-
-### 8.4 技術的証拠だけでは決められない
-
-Humanへescalateする。質問には事実、試したこと、2〜3個の選択肢、推奨案、各案の影響、回答によって解禁される操作を含める。
-
-## 9. Risk class案
-
-### `R0`: 読み取り・分析
-
-Repositoryや公開資料の調査、local test、既存artifactの分析。Main Agentが自律的に実行できる。
-
-### `R1`: 可逆なrepository変更
-
-Branch上のコード、test、文書、設定、CI変更。後述のmerge contractをすべて満たせばHuman承認なしでmergeできる。
-
-初期のauto-merge対象候補は次とする。
-
-- Test追加
-- 内部refactor
-- 文書間の整合修正
-- 決定論的な検査tool
-- 外部副作用のないbug fix
-
-CODEOWNERS対象path（3.1）を変更するPRは常に`R2`とする。加えて、次のtrusted computing baseはrepository内の変更でも`R2`とし、通常のauto-merge対象にしない。15.2のCODEOWNERS追加により、これらの多くはcode owner reviewで保護される。
-
-- GitHub Actions workflowとrequired check設定
-- Controllerとmerge処理
-- Risk classifier
-- Task Contract、portfolio、review resultのschemaとvalidator
-- Main/Review Agentの権限・指示・prompt
-- Controller配下の限定writer operation
-- Review check発行処理
-- `AGENTS.md`とこのworkflowのnormativeな規則
-- Testやgateを削除・緩和する変更
-
-### `R2`: Human専用判断
-
-初期案では次をHumanへ残す。
-
-- `GOAL.md`の目的、成功条件、non-goalの実質的変更
-- このrisk policyとAgent権限の変更
-- Baseline、評価metric、成功閾値の実質的変更
-- 結果確認後の実験条件変更など、controlled experimentの妥当性を損なう判断
-- Secret、credential、IAM、network公開範囲、GitHub rulesetの変更
-- 新しい有料resource、購入、契約、承認済み予算の超過
-- 本番または外部systemの変更、一般公開、第三者への送信
-- 回復手段を確認できない削除、履歴改変、data migration
-- 法務、license、安全、倫理、privacyの判断
-- 同じblocking findingが規定回数続いた場合
-- 複数案が同程度で、選択が後続研究を大きく拘束する場合
-
-将来は、Humanがregion、resource、上限費用、上限時間、停止条件をまとめて承認するbudget envelopeを定義し、その範囲内の反復実験を`R1`相当へ移すことを検討する。
-
-## 10. Review contract
-
-Review AgentへMain Agentの会話履歴や結論は渡さない。一方、責務を果たすために次のread-only accessを許可する。
-
-- `GOAL.md`
-- このworkflowとrisk policy
-- Task Contract
-- Base SHAとhead SHA
-- Diff
-- Test、CI、benchmarkの結果
-- 関連artifact
-- Repository全体
-- Open Issue/PRとそのreview・CI状態
-- Current portfolio
-
-Controllerは取得時点、base/head SHA、Issue/PR一覧、artifact inventoryを含むstate snapshotを作り、review resultとともに保存する。Review Agentはsnapshotに限定されず、read-only toolで一次状態を再確認できる。
-
-Review Agentは最低限次を確認する。
-
-- Goalに寄与する作業か
-- より優先すべき明白なblockerを無視していないか
-- 受け入れ条件が検証可能か
-- Scope外の変更がないか
-- 仮定と未検証事項が明示されているか
-- 必要なtestがあるか
-- Risk classが過小評価されていないか
-- Controlled experimentの比較条件を壊していないか
-- Rollback可能か
-
-Review Agentの`PASS`はCIの代用ではなく、CIもReview Agentの代用ではない。
-
-## 11. Deterministic gate
-
-Human review requirementを外す前に、最低限次を自動検査へ移す。
-
-- Clean checkout上のunit test
-- `check-config`
-- Offline/mockの独立2 runと比較
-- Python compileまたは静的検査
-- Diff whitespace check
-- Task Contractの必須項目とGoal trace
-- Task Contract schema、digest、Plan review対象digestの一致
-- Portfolio schemaとactive taskの一意性
-- Review対象SHAと最新head SHAの一致
-- Base branch最新化とconflictなし
-- Unresolved blocking threadなし
-- 変更対象に応じたrisk classification
-- Artifactとmanifest schema
-- 失敗時artifactの保持
-- Controllerがrequired checkをGitHubから再取得したこと
-- Main/Reviewにmerge権限がないこと
-
-Dependency lock、secret scan、依存脆弱性検査、post-merge smoke、rollback自動化は、変更範囲とriskに応じて段階的に追加する。
-
-Merge条件は論理的に次とする。
-
-```text
-Plan review PASS
-AND Diff review PASS for current head SHA
-AND Required CI PASS for current head SHA
-AND Policy PASS
-AND Mergeable with current base
+```sh
+git fetch origin
+git switch main
+git pull --ff-only origin main
+codex exec --full-auto ".codex/prompts/l4-loop.mdを読み、定期開発workflowを1工程進めてください"
 ```
 
-## 12. GitHub上のReview Agent表現
+実行環境はGitHub Appの短命credentialを使い、repository外のsecret、課金resource作成権限、ruleset変更権限を渡さない。自動mergeを有効にする段階では、対象repositoryのPR mergeに必要な最小権限だけを与える。
 
-Subagentを別contextで実行しても、Main Agentと同じGitHub App credentialを使う場合、GitHub上では独立したreviewer identityにならない。
+### 6.2 毎回の作業選択順序
 
-初期案には次の選択肢がある。
+Root Agentは次の上から最初に該当するものを1件だけ完了し、終了する。
 
-### 案A: Review結果をPR commentとして記録
+1. Agent作成PRのHuman feedback、Review `FAIL`、failed CIへ対応する
+2. Review待ちのPRを独立reviewする
+3. Merge条件を満たしたPRをmergeする。CODEOWNERS対象ならHuman待ちを報告する
+4. Plan review済みIssueを実装してPRを作る
+5. Plan review前のIssueをreviewし、結果をIssueへ残す
+6. Blocked Issueの解除条件が満たされたか確認する
+7. Goalとの差分から候補を比較し、Issueを1件作る
 
-- 実装が簡単
-- 現在のCodex実行環境で開始しやすい
-- 独立性はworkflow規約に依存し、GitHub rulesetでは強制できない
+これにより、通常の作業はHuman responseを挟まず、複数回の定期実行で次のように進む。
 
-### 案B: Review結果をrequired status checkとして発行
+| 定期実行 | GitHubへの結果 |
+|---|---|
+| Run 1 | Issue作成 |
+| Run 2 | Plan review comment |
+| Run 3 | 実装branchとdraft PR作成 |
+| Run 4 | CI確認、Diff review comment、必要なら修正 |
+| Run 5 | 最新headのchecksを再確認してmerge |
 
-- Head SHAとの一致をGitHub rulesetで強制できる
-- Review実行service、GitHub App権限、status check発行処理が必要
+1回のrunで1工程に限定するのは、途中失敗から再開しやすくし、重複PRや同時編集を避けるためである。操作前に既存Issue、PR、commentを検索し、同じ入力状態に対する操作を繰り返さない。
 
-### 案C: Review専用GitHub identityを用意
+### 6.3 Merge条件
 
-- GitHub上のreviewerを分離できる
-- Credential、権限、運用管理が増える
+CODEOWNERS対象外の通常PRは、次をすべて満たした場合だけAgentがmergeする。
 
-案Aはshadow運用だけに限定する。Phase 3のauto-mergeを開始する前に案Bを実装し、Plan review、Diff review、policyをhead SHAとcontract digestへ結び付いたrequired checkにする。案Aだけでauto-mergeすることは認めない。
+- 関連IssueのPlan reviewが`PASS`
+- 最新head SHAに対するDiff reviewが`PASS`
+- Required checksがすべて成功
+- PRがdraftではなく、conflictがない
+- 未解決のHuman comment、changes requested、blocking threadがない
+- IssueのscopeとPR差分が一致する
 
-## 13. Retryと停止条件
+CODEOWNERS対象pathを含むPRは、上記に加えて`@bara8383`のApproveを必要とし、AgentはHuman review前にmergeしない。
 
-Reviewの無限loopを防ぐ。
+Phase 1ではすべてHumanがmergeし、この判定をshadow運用する。Phase 2でrulesetとCIを整備した後、CODEOWNERS対象外だけAgent mergeへ切り替える。
 
-- `FAIL`後はMain Agentが修正し、新しいcontextのReview Agentが最新headをreviewする
-- 同じ原因のblocking findingが2回続いた場合は、修正案を再計画する
-- 同じ原因が3回続き、追加の証拠や別案がなければHumanへescalateする
+## 7. Subagentsの使い方
 
-通常loopを停止できるのは次の場合だけとする。
+### 7.1 Root Agent
 
-- `R2`判断なしでは安全に進められる作業がない
-- 認証、権限、外部service障害に対する安全な代替経路がない
-- Retry上限へ到達した
-- 事前に定めた時間、token、費用budgetへ到達した
-- Goalの完了条件を証拠付きで満たした
+Root Agentだけがworkflowを進行し、GitHubへのcomment、branch作成、commit、push、PR作成、許可されたmergeを行う。複数subagentの結論が競合する場合もRoot Agentが一次情報を確認して統合する。
 
-停止は完了を意味しない。Blockerと解除条件を残す。
+### 7.2 Plan reviewer
 
-## 14. 開発loop案
+Issue作成後、別contextのsubagentへ次だけを依頼する。
 
 ```text
-GOAL / main / GitHub / artifacts
-              ↓
-         Main Agent
-              ↓
-   Candidate tasks / Task Contract
-              ↓
-     Review Agent: Plan review
-       FAIL ↙           ↘ PASS
-      修正               実装
-                         ↓
-                    Local checks
-                         ↓
-                         PR
-                         ↓
-     Review Agent: Diff review
-       FAIL ↙           ↘ PASS
-      修正               CI / policy
-       ↑                    ↓
-       └──────────────── FAIL
-                            ↓ PASS
-                          Merge
-                            ↓
-                  Post-merge verification
-                            ↓
-                       Repo state更新
-                            ↺
+GOAL.md、repository、open Issue/PR、Issue #Nを読み取り専用で確認する。
+このIssueが次の1件として妥当か、scopeと完了条件が検証可能かをreviewする。
+変更は行わず、PASSまたはFAIL、blocking findings、確認した根拠を返す。
 ```
 
-同時に扱うagent作成のopen PRは原則1件とする。1回の定期実行でmergeするPRも最大1件とし、blast radiusを制限する。
+Root Agentは結果をIssue commentへ記録する。Commentには`<!-- l4-plan-review -->`、Issue本文のSHA-256、`PASS`または`FAIL`、blocking findingsを含める。Issue本文を変更すると以前の`PASS`は無効になる。`FAIL`ならIssueを修正し、新しいsubagentで再reviewする。
 
-Issueは次の場合に使用する。
+### 7.3 Diff reviewer
 
-- 複数PRにまたがる作業
-- 長期間残す研究課題
-- Human decisionが必要な事項
-- 外部resourceや他systemとの調整
+PRのCI完了後、Plan reviewerとは別の新しいcontextで次を依頼する。
 
-1 PRで完結する通常作業に、着手承認用Issueを必須としない。
+```text
+Issue #N、PR #M、base、最新head SHA、diff、test結果を読み取り専用で確認する。
+correctness、scope、回帰、test不足、Goalとの不整合をreviewする。
+変更は行わず、対象head SHA、PASSまたはFAIL、blocking findingsを返す。
+```
 
-## 15. 具体化: どのファイルをどう変更し、どう動かすか
+Review結果は`<!-- l4-diff-review -->`、head SHA、`PASS`または`FAIL`、blocking findingsを含むPR commentとして残す。Headが変わったら以前の`PASS`は無効になり、再reviewする。
 
-この節は、Shadow modeやportfolioより前に実装する最小構成（Phase 1）を、変更するファイル、コマンド、1回の定期実行の手順まで具体化する。
+### 7.4 使わない場面
 
-Phase 1ではHuman gate（作業開始の承認、PRのApprove、merge）は現状どおり維持する。変えるのは、Humanが承認する対象をIssue本文から機械検査可能なTask Contractへ移すことと、AIの判断を決定論的なtoolとCIで検査できるようにすることである。Shadow modeは、この仕組みが実際のTaskで動いてから、同じartifactに対するAI判定とHuman判定を比較する形で設計する。
+短い逐次作業や、同じfileを編集する実装を複数subagentへ分割しない。Subagentは独立調査、候補比較、read-only reviewに使う。共有worktreeへの書き込みはRoot Agentへ集約する。
 
-### 15.1 Phase 1完了時点でできること
+## 8. `AGENTS.md`、`CLAUDE.md`、prompt、Skillsの分担
 
-- `python3 -m automation.l4 status`が、GitHubとrepositoryの状態から次に行う作業を1つ返す。現在の定期実行promptに文章で書かれている「作業の選択順序」を、LLMの解釈ではなくコードで決める
-- Task ContractをJSON fileとして作成し、`validate`と`digest`で機械的に検査できる
-- PRごとにCIが自動実行され、test、`check-config`、mock 2 run比較、Task Contract検査、risk分類の結果がhead SHAに結び付いたcheckとして残る
-- Review Agentが別contextでPlanとDiffをreviewし、決まった形式でPRへ記録する
-- `python3 -m automation.l4 gate --pr <N>`がmerge条件を評価して判定を出す。Mergeは引き続きHumanが行う
+### 8.1 `AGENTS.md`
 
-### 15.2 変更・追加するファイル
+Repository全体で常に守る短い不変条件だけを書く。
 
-| Path | 種別 | 内容 | Code owner review |
+- `GOAL.md`を変える作業と、Goalへ向かう通常作業を区別する
+- GitHub・AI設定はcode owner review必須とする
+- 有料resource、secret、外部公開、破壊的操作を自律実行しない
+- Issue/PR/CIをsource of truthとし、既存作業を優先する
+- Review subagentはread-only、GitHub writeはRoot Agentへ集約する
+- Repository固有のtest command
+
+作業選択順序やIssue template全文は書かない。それらは変更頻度が高く、定期実行promptとtemplateに置く。
+
+### 8.2 `CLAUDE.md`
+
+Claude Codeを使う場合の薄い入口にする。`AGENTS.md`と同じ規則を複製せず、最初にrootの`AGENTS.md`を読むこと、repository固有の追加事項がある場合だけ記載する。
+
+初期の定期実行環境がCodexだけなら、`CLAUDE.md`は現在のcredential案内以外を変更しない。Claude用の独立agent定義も先に作らず、実際にClaudeを定期実行へ追加するとき別PRで提案する。
+
+### 8.3 `.codex/prompts/l4-loop.md`
+
+定期実行ごとに何を1件進めるかを書く。具体的には6.2の優先順位、reviewの起動条件、merge条件、終了状態を持つ。現在`docs/memo/prompt.md`にあるpromptをここへ移し、`/approve-issue`必須と全PRのHuman merge必須を段階移行に合わせて変更する。`.codex/`配下なので、変更には常にcode owner reviewが必要になる。
+
+### 8.4 Skills
+
+初期導入ではL4 loop全体をSkillにしない。Loopはscheduled prompt、状態はGitHub、常時規則は`AGENTS.md`に置く。
+
+Skillは、実運用で繰り返しが確認できた専門手順だけに使う。最初の候補は次である。
+
+- `review-research-plan`: 研究Issueの仮説、比較条件、metricをreviewする
+- `review-pr`: Issueに対するdiff、test、回帰riskをreviewする
+- `inspect-experiment-artifact`: Mark2 artifactの整合性を検査する
+
+各Skillは`SKILL.md`へ発火条件と手順を書き、必要なchecklistやscriptだけを同梱する。Skillに権限、workflow状態、merge可否を保存しない。配置とruntimeへの登録方法は、実際に使う実行環境を確定した実装PRで決める。
+
+## 9. 変更するファイル
+
+初期導入に必要な変更を次に限定する。
+
+| PR | Path | 変更内容 | Human reviewが必要な理由 |
 |---|---|---|---|
-| `.github/CODEOWNERS` | 変更 | `/automation/l4/`と`/automation/policy.json`を追加 | 必須 |
-| `.github/workflows/ci.yml` | 新規 | PR時のdeterministic check（15.6） | 必須 |
-| `.github/pull_request_template.md` | 新規 | Task ID、Goal trace、検証結果、未検証事項の欄 | 必須 |
-| `automation/__init__.py` | 新規 | package化のみ | 不要 |
-| `automation/l4/__main__.py` | 新規 | CLI entry。`status` / `validate` / `digest` / `classify` / `gate` | 必須（CODEOWNERS変更後） |
-| `automation/l4/contract.py` | 新規 | Task Contract validatorとdigest。canonical JSONは`mark2.config.sha256_json`と同じ規則を使う | 必須 |
-| `automation/l4/policy.py` | 新規 | 変更pathからrisk classを判定する。`.github/CODEOWNERS`と`automation/policy.json`を読む | 必須 |
-| `automation/l4/state.py` | 新規 | `gh`経由でopen PR、review、comment、check、head SHAを取得し、次の作業を決める | 必須 |
-| `automation/l4/gate.py` | 新規 | Merge条件の評価 | 必須 |
-| `automation/policy.json` | 新規 | R2 path rule、WIP上限、retry上限 | 必須 |
-| `automation/tasks/<task-id>.json` | 作業ごとに新規 | Task Contract本体。Main Agentが作成する | 不要（validatorとReview Agentで検査） |
-| `tests/test_l4.py` | 新規 | validator、digest、classify、status判定のunit test。`gh`の出力はfixtureで与える | 不要（test削除は`R2`） |
-| `.codex/prompts/l4-loop.md` | 新規 | 定期実行prompt。現在の自立開発promptを置き換える | 必須 |
-| `.codex/prompts/l4-review.md` | 新規 | Review Agent prompt。Plan/Diff共通で出力形式を固定する | 必須 |
-| `.claude/agents/l4-reviewer.md` | 新規 | Claude Codeで実行する場合のReview Agent定義。書き込み系toolを持たせない | 必須 |
-| `AGENTS.md` | 変更 | Task Contract必須、状態遷移、禁止操作などの不変条件を短く追記 | 必須 |
-| `GOAL.md` | 変更 | Mark2の検証可能な完了条件（Goal completion contract） | 必須 |
+| PR-1 | `.github/ISSUE_TEMPLATE/autonomous-task.yml` | 5.2のIssue form | `.github/`はCODEOWNERS対象 |
+| PR-1 | `.github/pull_request_template.md` | 5.4のPR template | `.github/`はCODEOWNERS対象 |
+| PR-2 | `.github/workflows/ci.yml` | Unit test、compile、`check-config`、mock 2 run、`git diff --check` | `.github/`はCODEOWNERS対象 |
+| PR-3 | `AGENTS.md` | 8.1の不変条件 | `AGENTS.md`はCODEOWNERS対象 |
+| PR-3 | `.codex/prompts/l4-loop.md` | 現行promptを移し、6.2の状態遷移とsubagent reviewを追加 | `.codex/`はCODEOWNERS対象 |
+| PR-3 | `docs/memo/prompt.md` | 新しいpromptへの移行案内に置き換える | 同じPRの`.codex/`変更にowner reviewが必要 |
 
-`automation/l4`はPython標準libraryだけで実装し、新しい依存を追加しない。`mark2`の`check-config`とmock runもML依存なしで動くため、CIは`requirements.txt`をinstallせずに実行できる。
+`CLAUDE.md`、`.claude/agents/`、Skillは初期導入では変更しない。必要性が実運用で確認された時点で、小さい別PRとして追加する。
 
-`.codex/`と`.claude/`の両方を用意するかはDecision 6で決める。どちらの場合もnormativeな規則は`AGENTS.md`に置き、promptとAgent定義は手順と出力形式だけを持つ。
+追加しないもの:
 
-### 15.3 Risk分類の実装
+- `automation/tasks/*.json`: Issueと重複するため
+- `automation/portfolio.json`: Issue/PR一覧と重複するため
+- `automation/policy.json`: CODEOWNERS、ruleset、実行環境の権限と重複するため
+- `automation/l4/`: 初期flowはGitHub状態とpromptで実行できるため
+- 独自Controller: scheduler、GitHub、CIで必要な状態遷移を表現できるため
 
-`python3 -m automation.l4 classify --base origin/main --head HEAD`は次の順で判定する。
+## 10. CIの最小構成
 
-1. `git diff --name-status <base>...<head>`で変更pathを取得する
-2. `.github/CODEOWNERS`のいずれかのpatternに一致するpathがあれば`R2`
-3. `automation/policy.json`の`r2_paths`に一致するpathがあれば`R2`
-4. `r2_if_deleted`に一致するfileの削除があれば`R2`
-5. それ以外は`R1`
-
-```json
-{
-  "schema_version": 1,
-  "codeowners_file": ".github/CODEOWNERS",
-  "r2_paths": ["mark2/configs/**", "mark2/requirements.txt"],
-  "r2_if_deleted": ["tests/**"],
-  "max_open_agent_prs": 1,
-  "max_merges_per_run": 1,
-  "retry": {"replan_after": 2, "escalate_after": 3}
-}
-```
-
-`mark2/configs/**`はbaselineと評価契約を含むため、Decision 2の推奨に従い`R2`とする。
-
-出力例:
-
-```json
-{"risk_class": "R2", "reasons": [{"path": ".github/workflows/ci.yml", "rule": "CODEOWNERS: /.github/"}]}
-```
-
-Task Contractに宣言された`risk_class`より判定結果が高い場合、`validate`は失敗する。
-
-### 15.4 Task Contractの具体例
-
-`automation/tasks/T-0001.json`の例を示す。内容は形式を示すためのもので、この作業を実施することを提案するものではない。
-
-```json
-{
-  "schema_version": 1,
-  "id": "T-0001",
-  "title": "mock backendの独立2 run一致をunit testで固定する",
-  "goal_trace": "GOAL.md Mark2: baselineの無変更再現 (#30)",
-  "current_evidence": [
-    "python3 -m unittest discover -s tests: 8 tests OK (main d8d9cd9)",
-    "mock 2 runの比較手順はdocs/mark2/README.mdにだけあり、testでは検査していない"
-  ],
-  "question": "run IDだけが異なる2回のmock runでcompareがreproducibleを返し続けるか",
-  "candidates": [
-    {"id": "A", "summary": "unit testでmock 2 runとcompareを実行する"},
-    {"id": "B", "summary": "CI stepだけで比較する", "rejected_reason": ".github変更でR2になり、local testで再現できない"}
-  ],
-  "selection_rationale": "R1で完結し、#30の再現性検査の前提を固定できる",
-  "outcome": "mock 2 runの一致が壊れたらtestが失敗する",
-  "scope": ["tests/test_mark2.py"],
-  "out_of_scope": ["mark2/configs/**", "実機GPU run"],
-  "acceptance_criteria": ["追加testがmainで成功する", "予測を1件変えるとtestが失敗する"],
-  "verification": ["python3 -m unittest discover -s tests -v"],
-  "rejection_condition": "mock runが非決定的で、test化にmark2本体の変更が必要な場合",
-  "risk_class": "R1",
-  "budget": {"max_minutes": 60, "paid_resources": false},
-  "rollback": "PRをrevertする",
-  "assumptions": []
-}
-```
-
-`validate`が決定論的に検査する項目:
-
-- 必須fieldの有無と型、`id`とfile名の一致
-- `risk_class`が`classify`の結果以上であること
-- 変更されたfileがすべて`scope`のpatternに含まれ、`out_of_scope`に含まれないこと。Scope外の変更はReview Agentに頼らずCIで検出する
-- `budget.paid_resources`が`true`の場合は`R2`であること
-- Contract file自身（`automation/tasks/<id>.json`）はscope検査の対象外とする
-
-`digest`は`sha256:<hex>`を出力する。Plan review結果はこの値を記録し、Contractを1文字でも変えると以前のPlan reviewは無効になる。
-
-### 15.5 Review結果の記録形式
-
-Phase 1では案AとしてPR commentに記録する。Review結果をbranchへcommitすると、head SHAが変わってDiff reviewが無効になるため、repository fileにはしない。
-
-```text
-<!-- l4-review:v1 -->
-{"kind": "diff", "task_id": "T-0001", "contract_digest": "sha256:…", "head_sha": "<40桁>", "verdict": "PASS", "blocking": [], "notes": [], "checked": ["unittest", "scope"], "reviewer_run": "<実行ID>"}
-```
-
-`gate`はmarker付きの最新commentを種類ごとに読み、`contract_digest`と`head_sha`が現在値と一致する場合だけ有効とする。Main Agentと同じGitHub identityで投稿されるため、Reviewの独立性はGitHub上では強制されない。Phase 1ではHumanがmergeするためこの制約を許容し、auto-merge前に案Bへ移行する（12章）。
-
-### 15.6 CI
+PR作成時に次を実行する。
 
 ```yaml
 name: ci
@@ -608,7 +355,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m unittest discover -s tests -v
-      - run: python -m compileall -q mark2 automation tests
+      - run: python -m compileall -q mark2 tests
       - run: python -m mark2.run check-config
       - name: mock 2 run comparison
         run: |
@@ -616,360 +363,110 @@ jobs:
           python -m mark2.run run --backend mock --run-id ci-2 --output-root "$RUNNER_TEMP/m2"
           python -m mark2.run compare "$RUNNER_TEMP/m2/ci-1" "$RUNNER_TEMP/m2/ci-2"
       - run: git diff --check "origin/${{ github.base_ref }}...HEAD"
-      - run: python -m automation.l4 validate --base "origin/${{ github.base_ref }}" --head HEAD
 ```
 
-- `pull_request` triggerと`contents: read`だけを使い、secretとwrite権限をCIへ渡さない
-- `validate`は、変更に`automation/tasks/*.json`が含まれないPR（Human作成のPRなど）では`task: none`としてscopeとrisk検査だけを行う
-- `checks`をrequired status checkにするのはruleset変更であり、HumanがGitHubの設定画面で行う（15.8）
+Workflowにはwrite権限やsecretを渡さない。PR-2 merge後、Humanが`checks`をrequired status checkへ設定する。
 
-### 15.7 1回の定期実行の流れ
+## 11. Humanへescalateする条件
 
-定期実行promptは`.codex/prompts/l4-loop.md`の短い指示だけにし、作業の選択はtoolに任せる。
+次の場合だけ通常loopを止め、既存Issueへ判断材料をまとめる。
 
-1. `AGENTS.md`を読み、`git fetch`と作業ツリーの確認を行う。Dirtyな場合は`BLOCKED`で終了する
-2. `python3 -m automation.l4 status`を実行する
-3. 返された`next_action`だけを1件実行し、終了状態を出力して終了する
+- CODEOWNERS対象pathの変更
+- `GOAL.md`の目的や成功条件の変更
+- Baseline、評価metric、成功閾値の実質的変更
+- Secret、credential、IAM、network、GitHub rulesetの変更
+- 有料resource、購入、契約、承認済み上限を超える操作
+- 外部system、本番、一般公開、第三者への送信
+- 回復方法を確認できない削除やdata migration
+- License、privacy、安全、倫理の判断
+- 同じblocking findingを2回修正しても解消できない場合
+- 複数案が同程度で、選択が後続研究を大きく拘束する場合
 
-`status`の出力例:
+Escalation commentには、確認した事実、試したこと、2〜3個の選択肢、推奨案、各案の影響、Human回答後に行う操作を書く。新しいpolicy fileの作成依頼にはしない。継続的に必要な判断基準だとHumanが判断した場合だけ、code owner review対象の文書または`AGENTS.md`へ追加する。
 
-```json
-{"next_action": "run_plan_review", "pr": 41, "task": "T-0001", "contract_digest": "sha256:…", "reason": "draft PR has no plan review for current digest"}
-```
+## 12. 段階導入
 
-`next_action`は上から順に評価し、最初に該当したものを返す。
+### Phase 1: Human mergeのままflowを検証
 
-| `next_action` | 条件 | Main Agentの動作 | 終了状態 |
-|---|---|---|---|
-| `blocked` | 認証失敗、未同期、conflict | 理由を出力 | `BLOCKED` |
-| `address_feedback` | Agent PRにfailed CI、changes requested、未回答のHuman comment、Review `FAIL`がある | 同じbranchで修正してpush | `UPDATED_PR` |
-| `run_plan_review` | 現在のcontract digestに対するPlan reviewがない | Review Agentを起動し、結果をcommentする | `UPDATED_PR` |
-| `await_plan_approval` | Plan `PASS`で、Humanの`/approve-plan`がない | 何もしない | `AWAITING_PLAN_APPROVAL` |
-| `implement` | `/approve-plan`済みで、実装commitがない | Contractの範囲で実装してpushし、draftを解除する | `UPDATED_PR` |
-| `run_diff_review` | 現在のhead SHAに対するDiff reviewがなく、CIが完了している | Review Agentを起動し、結果をcommentする | `UPDATED_PR` |
-| `report_gate` | Diff `PASS`でgate判定が未投稿 | `gate --pr <N>`の結果をcommentする | `AWAITING_PR_REVIEW` |
-| `await_human` | Gate判定済みでHumanのApproveまたはmerge待ち | 何もしない | `AWAITING_PR_REVIEW` / `AWAITING_HUMAN_MERGE` |
-| `propose_task` | 上記のいずれにも該当しない | 候補を比較してTask Contractを書き、そのfileだけを含むdraft PRを作る | `CREATED_PR` |
+PR-1〜PR-3を導入し、最低3件の通常TaskでIssue作成、Plan review、実装、Diff review、CI、Human mergeまで通す。
 
-この表により、現在のIssue中心の流れは次のように置き換わる。
+確認する項目:
 
-| 現在 | Phase 1 |
-|---|---|
-| Agentが提案Issueを作る | Agentが`automation/tasks/<id>.json`だけを含むdraft PRを作る |
-| Humanが`/approve-issue`する | Review AgentのPlan `PASS`後、Humanが同じdraft PRで`/approve-plan`する |
-| Agentが別branchで実装し、PRを作る | 同じPRへ実装commitを追加する。Contractを変更すると承認とPlan reviewは無効になる |
-| HumanがApproveしてmergeする | CI、Diff review、`gate`の判定が揃った後、HumanがApproveしてmergeする |
+- 同じIssueやPRを重複作成しない
+- Review subagentが実装Agentの結論を追認するだけになっていない
+- Issueの完了条件だけでDiffを判定できる
+- CODEOWNERS対象を正しくHumanへ回せる
+- Agentのmerge判定とHuman判断が一致する
 
-Humanの承認対象がTask Contractとgate判定になるため、Phase 2ではHumanの判断を記録したまま、同じartifactに対するAI判定との一致を測定できる。
+### Phase 2: 通常PRのAgent merge
 
-Review Agentの起動方法:
+Phase 1でblocking findingの見逃しと誤ったmerge判定がなく、required checkが有効になったら、CODEOWNERS対象外の通常PRだけAgent mergeを許可する。
 
-- Main Agentとは別process・別contextで起動し、入力はPR番号、review種別、contract digest、head SHAだけにする
-- Review Agentは`gh pr view`、`gh pr diff`、`git show`、test実行などのread操作で一次情報を確認する
-- Review Agentの出力はmarker付きJSONだけとし、Main Agentがそのままcommentする。Main Agentが内容を書き換えたかは、`reviewer_run`とReview Agentの実行logで監査する
+Humanは各PRの承認者ではなく、GitHub・AI設定、Goal、費用、例外判断のownerになる。
 
-`gate --pr 41`の出力例:
+### 将来候補
 
-```json
-{"pr": 41, "head_sha": "<40桁>", "plan_review": "PASS (digest match)", "diff_review": "PASS (head match)", "ci": "success", "risk_class": "R1", "mergeable": "CLEAN", "verdict": "MERGEABLE"}
-```
+運用上必要だと分かってから、次を個別に検討する。
 
-`verdict`は`MERGEABLE`、`NOT_READY`（不足している条件を列挙）、`REQUIRES_CODE_OWNER`（`R2`）のいずれかとする。
+- 定型reviewをSkill化する
+- Review結果をPR commentから専用required checkへ移す
+- 承認済みの費用上限内で実験を反復する
+- 複数の独立実験を並列化する
 
-### 15.8 実装の順序
+Portfolio、独自Task JSON、独自policy engineは、Issue/PR運用で具体的な不足が確認されるまで導入しない。
 
-各PRは前のPRがmergeされてから作る。15.2のとおり、どのPRもCODEOWNERS対象pathを含むためcode owner reviewを経る。
+## 13. 実装Issueの分割
 
-1. **PR-1**: `.github/CODEOWNERS`へ`/automation/l4/`と`/automation/policy.json`を追加し、`automation/policy.json`を置く
-2. **PR-2**: `automation/l4`の`contract` / `digest` / `classify` / `validate`と`tests/test_l4.py`
-3. **PR-3**: `.github/workflows/ci.yml`とPR template。Merge後、Humanが`checks`をrequired status checkへ追加する
-4. **PR-4**: `automation/l4`の`status`と`gate`、fixtureを使ったtest
-5. **PR-5**: `.codex/prompts/l4-loop.md`、`l4-review.md`（または`.claude/agents/l4-reviewer.md`）、`AGENTS.md`への追記。Merge後、Humanが定期実行の参照先をこのpromptへ切り替える
-6. **PR-6**: `GOAL.md`へGoal completion contractを追加する。内容はHumanが決め、AIは下書きだけを作る
+方針承認後、次の3件だけを作る。
 
-PR-5のmerge後、最低1件の実Taskで15.7の流れを最後まで通す。そこで得たcommentやcheckの記録をもとに、portfolio（6.1）とShadow mode（Phase 2）の具体的な設計を別PRで提案する。
-
-### 15.9 Humanが行う操作
-
-| タイミング | 操作 |
-|---|---|
-| PR-1〜PR-6 | Code owner review |
-| PR-3のmerge後 | `main-protect` rulesetへ`checks`をrequired status checkとして追加 |
-| PR-5のmerge後 | 定期実行の参照promptを`.codex/prompts/l4-loop.md`へ切り替え |
-| PR-6 | Goal completion contractの内容決定 |
-| 各Task | draft PRでの`/approve-plan`、最終Approveとmerge |
-
-## 16. 段階移行案
-
-### Phase 1: 制御面の実装
-
-- Goal completion contractとportfolio schema
-- Task Contract schema、digest、validator
-- Baseline CI
-- Main/Reviewの入出力とreview result schema
-- Risk policyとtrusted computing base
-- SHA binding、retry、escalation条件
-- Review/Policy required check
-- Controllerとauthority分離
-- Shadow telemetry
-
-### Phase 2: Shadow mode
-
-> 具体化の時期: 15.8の実装順序を終え、最低1件の実Taskで15.7の流れを通した後に、記録方法と集計手順を具体化する。以下は卒業条件の方向性を示す。
-
-最低5件の対象PRで、AIがTask選択、Plan review、Diff review、merge判定まで行う。Humanは各工程の承認者ではなく、最終判定の監査者とする。Merge操作はHumanが行う。
-
-次を記録する。
-
-- AIが見逃したblocking finding
-- 不必要なescalation
-- 誤った作業選択
-- 同じ指摘の反復回数
-- Humanが修正したrisk分類
-- Merge後のfailure
-
-Phase 3への卒業条件は次のすべてとする。
-
-- 対象となる新規PRが5件以上。PR #34はmechanicsのdry runには使うが、既にHuman review済みのためこの5件には数えない
-- Human監査でblocking findingの見逃し0件
-- `R2`を`R1`と判定した事例0件
-- Contract digestまたはhead SHAの不一致0件
-- 必須状態遷移の証拠欠落0件
-- Merge判定後またはmerge後のrequired check failure 0件
-- 同一原因のReview FAILが3回に達した事例0件
-
-Shadow卒業はrisk policyの変更に当たるため、上記証拠をまとめた1回のHuman判断を必要とする。個々のPR承認へ戻すものではない。
-
-### Phase 3: 限定auto-merge
-
-Shadow卒業条件をすべて満たし、Review/Policy checkがGitHub rulesetで強制され、Controllerのcredential分離が実行環境のsecret/IAM境界で強制された場合に限り、`R1`の一部について自律mergeを許可する。
-
-次は対象外から開始する。
-
-- `GOAL.md`
-- Agent指示とrisk policy
-- Baselineと評価契約
-- Dependencyとsupply chain
-- IAM、費用、network、外部resource
-- GitHub rulesetとworkflow権限
-- Controller、validator、risk classifier、review prompt
-
-### Phase 4: 研究loopへの拡張
-
-固定されたbaseline、metric、budget、resourceの範囲内で、仮説選択、実装、比較実験、結果記録、採用・修正・棄却まで自律化する。
-
-必要であればbudget envelopeを導入し、個別の有料実行承認を減らす。
-
-## 17. 現在のPR #34への適用案
-
-PR #34をworkflow mechanicsのdry run対象とする。既にHumanの内容reviewを受けているため、Review Agentの独立精度を測るshadow sampleには数えない。
-
-1. `main`との差分を整理し、最新baseへ更新する
-2. PR #34のTask Contractを復元する
-3. 新しいCIをclean checkoutで実行する
-4. Review AgentがPlanと最新diffを独立reviewする
-5. AIがmerge可否を判定する
-6. Shadow期間中のため、最終mergeだけHumanが行う
-7. Merge後に#33のcloseと、#30に残る実機2 runの作業を確認する
-
-これにより、抽象的なworkflowだけでなく、実在する停滞中PRで状態遷移を検証できる。
-
-## 18. Skillの位置づけ
-
-初期段階ではL4 loop全体をSkillにしない。
-
-- `AGENTS.md`: 常に適用するrepository固有の不変条件
-- Development workflow: Risk、状態遷移、merge条件
-- 定期実行prompt: Loopを開始する短い指示
-- CI: 決定論的な検証
-- Skill: 繰り返し利用する専門的な手順
-
-実運用で繰り返し必要になった場合、次のSkillを個別に検討する。
-
-- 次のTask Contractを生成・比較するSkill
-- Research planをreviewするSkill
-- PRのGoal整合性と研究妥当性をreviewするSkill
-- Experiment artifactを検査するSkill
-
-Skillはworkflowを教える層であり、永続状態、権限、merge gateを管理するControllerの代わりにはしない。
-
-## 19. 今回レビューしてほしい点
-
-### Decision 1: Shadow期間
-
-推奨: 上記の客観条件を満たす新規5 PR。
-
-代替: 対象PRを10件に増やす、または期間条件も追加する。Required checkと権限分離を省略した即時auto-mergeは選択肢に含めない。
-
-### Decision 2: Baseline・評価metricの扱い
-
-推奨: 初期は`R2`とし、Human判断を必要とする。
-
-代替: 事前に選定rubricと変更条件を固定し、条件内の変更を`R1`へ移す。
-
-### Decision 3: Review結果のGitHub上の表現
-
-提案上の必須条件: Shadow期間はPR commentを許可するが、auto-merge開始前にrequired status check化する。
-
-代替: Shadow開始時点からreview service/checkを実装する、またはReview専用identityも併用する。
-
-### Decision 4: Retry上限
-
-推奨: 同じ原因が2回続いたら再計画、3回でescalate。
-
-代替: 2回でescalateし、tokenと手戻りを抑える。
-
-### Decision 5: 有料resource
-
-推奨: 初期は個別Human判断を維持し、運用安定後にbudget envelopeを導入する。
-
-代替: 最初から月額、1 run、region、instance type、停止条件を固定したenvelopeを作る。
-
-### Decision 6: Agent実行環境の設定置き場
-
-推奨: 現在の定期実行環境に合わせて`.codex/`だけで開始し、`.claude/agents/l4-reviewer.md`は必要になった時点で追加する。
-
-代替: 最初から`.codex/`と`.claude/`の両方を用意する。二重管理を避けるため、どちらの場合もnormativeな規則は`AGENTS.md`だけに置く。
-
-### Decision 7: `automation/`のCODEOWNERS追加
-
-推奨: `/automation/l4/`と`/automation/policy.json`をCODEOWNERSへ追加し、gate本体をcode owner review必須にする。`automation/tasks/`はAIが書けるように対象外とする。
-
-代替: Controllerとpolicyを`.github/`配下へ置き、既存のCODEOWNERSで保護する。CODEOWNERSの変更は不要になるが、Python packageとしての配置が不自然になる。
-
-## 20. 実装Issue分割案
-
-方針承認後は、次の依存順で実装Issueへ分割する。各Issueは前段の成果物を入力とする。
-
-15.8のPRとの対応は次のとおり。I1のportfolio部分とI6は、Phase 1が実Taskで動いた後に具体化する。
-
-| Issue | 15.8のPR |
-|---|---|
-| I1 | PR-6（Goal completion contract）。Portfolioは後続 |
-| I2 | PR-1、PR-2 |
-| I3 | PR-3 |
-| I4 | PR-5（Phase 1はPR comment。Check Run発行は後続） |
-| I5 | PR-4（`status`と`gate`）。限定writerとcredential分離は後続 |
-| I6 | 後続 |
-
-### I1. Goal completion contractとportfolio
+### I1. Issue・PR template
 
 成果物:
 
-- 検証可能なGoal completion contract
-- `automation/portfolio.json`
-- Portfolio schemaとvalidator
+- `.github/ISSUE_TEMPLATE/autonomous-task.yml`
+- `.github/pull_request_template.md`
 
-受け入れ条件:
+完了条件:
 
-- Current milestone、candidate、dependency、evidence、状態を機械的に検査できる
-- Active taskが最大1件である
-- Goal completion contractの変更が`R2`として検出される
+- IssueだけでGoal trace、候補比較、scope、完了条件、検証方法をreviewできる
+- PRだけで対応Issue、変更内容、検証結果、未解決事項をreviewできる
 
-### I2. Task Contractとpolicy schema
-
-依存: I1
+### I2. Baseline CI
 
 成果物:
 
-- Task Contract JSON schema
-- Risk policy
-- Trusted computing baseのpath rule
-- Contract digestとvalidator
+- `.github/workflows/ci.yml`
+- Required checkの設定手順
 
-受け入れ条件:
+完了条件:
 
-- 必須項目不足、未知のrisk class、portfolioにないtaskを拒否する
-- Contract変更でdigestが変わり、以前のPlan PASSを再利用できない
-- Trusted computing base変更を`R2`として分類する
+- Clean checkoutでunit test、compile、`check-config`、mock比較、diff checkが成功する
+- 失敗したPRはmerge可能にならない
 
-### I3. Baseline CI
-
-依存: I1
+### I3. 定期実行promptとrepository instructions
 
 成果物:
 
-- Clean checkout上のtest、`check-config`、mock比較、compile、diff check
-- Artifact/manifest schema check
+- `.codex/prompts/l4-loop.md`
+- 新しいpromptへの移行案内にした`docs/memo/prompt.md`
+- 更新した`AGENTS.md`
 
-受け入れ条件:
+完了条件:
 
-- PRの最新head SHAに対してrequired checkが実行される
-- Test削除やcheck失敗時にmerge可能状態にならない
-- Failure artifactを取得できる
+- GitHubの状態だけから6.2の次の工程を選べる
+- Plan/Diff reviewを別contextのsubagentへ委譲する
+- CODEOWNERS対象外のmerge条件とHuman escalation条件が明確である
+- 同じ入力状態に対して操作を重複しない
 
-### I4. Review resultとrequired check
+## 14. 今回レビューしてほしい判断
 
-依存: I2、I3
+1. 通常作業では`/approve-issue`を廃止し、Plan review subagentの`PASS`で実装へ進んでよいか
+2. Phase 1を通常Task 3件のshadow運用とし、その後CODEOWNERS対象外だけAgent mergeへ移してよいか
+3. SubagentはPlan/Diffのread-only reviewに限定し、repositoryとGitHubへのwriteをRoot Agentへ集約してよいか
+4. 初期実装をtemplate、CI、`AGENTS.md`、定期実行promptの3 PRに限定してよいか
+5. SkillとClaude用agent定義は必要性が確認されるまで追加しない方針でよいか
 
-成果物:
+## 15. 参考資料
 
-- Plan/Diff review result schema
-- Read-only state snapshot
-- Review実行とCheck Run発行処理
-
-受け入れ条件:
-
-- Plan resultがContract digestへ結び付く
-- Diff resultがhead SHAへ結び付く
-- Contract/head更新で以前のPASSが無効になる
-- Review Agentにbranch writeとmerge権限がない
-
-### I5. Controllerと権限分離
-
-依存: I3、I4
-
-成果物:
-
-- State machine
-- Merge前のrequired check再取得
-- Authority matrixに沿ったGitHub Appまたはtoken権限
-- Mainのpatch/commit候補を受け取り、許可されたbranch/PR操作だけを行う限定writer
-- Retry、lease、idempotency、post-merge verification
-
-受け入れ条件:
-
-- Main/ReviewへGitHub write credentialが公開されず、GitHub mutationは限定writer経由でしか実行できない
-- Mainが任意のGitHub API、`git push`、merge APIを直接実行できない
-- Controllerは最新headの全gate成功時だけmergeできる
-- Duplicate invocationで二重mergeや二重PRを起こさない
-- Post-merge failureを記録し、自動停止またはrollback判断へ遷移する
-
-### I6. Shadow telemetryと卒業監査
-
-依存: I1〜I5
-
-成果物:
-
-- 5件以上の対象PRのtransition log
-- 見逃し、誤分類、SHA/digest不一致、evidence欠落の集計
-- Phase 3移行decision packet
-
-受け入れ条件:
-
-- Phase 2の全卒業条件を機械集計できる
-- 未達の場合はauto-mergeを有効化できない
-- Humanが1回のpolicy判断でPhase 3移行可否を決められる
-
-## 21. L4移行の合格条件案
-
-- AgentがGoalと証拠からTask Contractを生成できる
-- AI-maintained portfolioが候補、依存関係、棄却理由、現在のmilestoneを保持する
-- 候補がある限り1件を選び、選べない場合はdecision packetを作る
-- PlanとDiffがMain Agentとは別contextでreviewされる
-- Task Contract digestとPlan reviewが一致する
-- Review対象SHAとmerge対象SHAが一致する
-- Required CIとpolicy checkなしではmergeできない
-- Main/Reviewにはmerge権限がなく、Controllerだけがmergeできる
-- Main/ReviewにGitHub write credentialが公開されず、限定writerとmerge operationが分離されている
-- Retry上限とescalation条件がある
-- 費用、権限、破壊的操作がpolicyで拒否される
-- Shadow期間中に重大な誤merge判定がない
-- Merge後failureを検出し、停止、rollbackまたはescalationできる
-- 失敗・棄却された研究結果もartifactとして残る
-
-## 22. 参考資料
-
-- [OpenAI: Using Goals in Codex](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex)
 - [OpenAI: Multi-agent](https://developers.openai.com/api/docs/guides/responses-multi-agent)
 - [OpenAI: Skills](https://developers.openai.com/plugins/concepts/skills)
