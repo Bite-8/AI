@@ -52,7 +52,9 @@ fi
 export GH_TOKEN=$github_token
 unset github_token
 
-gh api user --jq .login >/dev/null
+# Installation tokens authenticate as an app installation and cannot call /user.
+# Probe the repository endpoint that this workflow actually needs instead.
+gh api repos/Bite-8/AI --jq .full_name >/dev/null
 codex login status >/dev/null
 
 result_file=$(mktemp /tmp/ai-development-result.XXXXXX)
