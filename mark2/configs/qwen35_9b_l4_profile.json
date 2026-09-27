@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "python_minimum": [3, 10],
+  "packages": {
+    "accelerate": "1.15.0",
+    "datasets": "5.0.1",
+    "safetensors": "0.8.0",
+    "torch": "2.14.0",
+    "transformers": "5.17.0"
+  },
+  "accelerator": {
+    "cuda_required": true,
+    "bf16_required": true,
+    "gpu_count": 1,
+    "gpu_name": "NVIDIA L4",
+    "memory_total_mib_minimum": 22500
+  },
+  "disk_free_bytes_minimum": 107374182400
+}

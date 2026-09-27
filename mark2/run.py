@@ -15,12 +15,13 @@ from typing import Any, Iterable
 from uuid import uuid4
 
 from .config import read_config, sha256_json, validate_run_id
-from .environment import collect, command
+from .environment import SystemProbe, collect, command, evaluate_preflight, read_profile
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = PACKAGE_DIR.parent
 DEFAULT_CONFIG = PACKAGE_DIR / "configs" / "qwen35_9b_mmlu.json"
+DEFAULT_PROFILE = PACKAGE_DIR / "configs" / "qwen35_9b_l4_profile.json"
 ANSWER = re.compile(r"(?<![A-Za-z])([A-D])(?![A-Za-z])", re.IGNORECASE)
 
 
@@ -221,18 +222,34 @@ def make_prediction(row: dict[str, Any], output_text: str, elapsed: float) -> di
     }
 
 
-def _snapshot(run_dir: Path) -> dict[str, str]:
+def _snapshot(run_dir: Path, profile_path: Path = DEFAULT_PROFILE) -> dict[str, str]:
     source_dir = run_dir / "source"
     source_dir.mkdir()
     hashes = {}
-    for source in (PACKAGE_DIR / "config.py", PACKAGE_DIR / "environment.py", PACKAGE_DIR / "run.py", PACKAGE_DIR / "requirements.txt"):
+    for source in (
+        PACKAGE_DIR / "config.py",
+        PACKAGE_DIR / "environment.py",
+        PACKAGE_DIR / "run.py",
+        PACKAGE_DIR / "requirements.txt",
+        profile_path,
+    ):
         target = source_dir / source.name
         shutil.copyfile(source, target)
         hashes[source.name] = hashlib.sha256(source.read_bytes()).hexdigest()
     return hashes
 
 
-def execute_run(config: dict[str, Any], config_path: Path, output_root: Path, run_id: str, backend: Any) -> Path:
+def execute_run(
+    config: dict[str, Any],
+    config_path: Path,
+    output_root: Path,
+    run_id: str,
+    backend: Any,
+    *,
+    expected_commit: str | None = None,
+    profile_path: Path = DEFAULT_PROFILE,
+    preflight_probe: SystemProbe | None = None,
+) -> Path:
     validate_run_id(run_id)
     run_dir = output_root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -248,12 +265,27 @@ def execute_run(config: dict[str, Any], config_path: Path, output_root: Path, ru
         "git_commit": command(["git", "-C", str(REPOSITORY_ROOT), "rev-parse", "HEAD"]),
         "git_status": command(["git", "-C", str(REPOSITORY_ROOT), "status", "--porcelain"]),
         "environment": collect(run_dir),
-        "source_sha256": _snapshot(run_dir),
+        "source_sha256": _snapshot(run_dir, profile_path),
         "result_classification": "unverified" if backend.name == "transformers" else "mock-only",
     }
     write_json(run_dir / "manifest.json", manifest)
     started = time.perf_counter()
     try:
+        if backend.name == "transformers":
+            if expected_commit is None:
+                raise ValueError("--expected-commit is required for transformers runs")
+            profile = read_profile(profile_path)
+            probe = preflight_probe or SystemProbe(REPOSITORY_ROOT, run_dir)
+            preflight = evaluate_preflight(profile, expected_commit, probe)
+            write_json(run_dir / "preflight.json", preflight)
+            manifest["preflight"] = {
+                "passed": preflight["passed"],
+                "report": "preflight.json",
+                "profile": str(profile_path),
+            }
+            if not preflight["passed"]:
+                failed = [item["name"] for item in preflight["checks"] if not item["passed"]]
+                raise RuntimeError(f"host preflight failed: {', '.join(failed)}")
         predictions = backend.run(config, manifest, run_dir)
         with (run_dir / "predictions.jsonl").open("x", encoding="utf-8") as handle:
             for row in predictions:
@@ -271,6 +303,24 @@ def execute_run(config: dict[str, Any], config_path: Path, output_root: Path, ru
         manifest["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
         write_json(run_dir / "manifest.json", manifest)
     return run_dir
+
+
+def execute_preflight(
+    profile_path: Path,
+    expected_commit: str,
+    output_root: Path,
+    run_id: str,
+    probe: SystemProbe | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    """Create a unique preflight artifact even when validation fails."""
+    validate_run_id(run_id)
+    run_dir = output_root / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+    profile = read_profile(profile_path)
+    report = evaluate_preflight(profile, expected_commit, probe or SystemProbe(REPOSITORY_ROOT, run_dir))
+    report_path = run_dir / "preflight.json"
+    write_json(report_path, report)
+    return report_path, report
 
 
 def _predictions(path: Path) -> list[dict[str, Any]]:
@@ -307,11 +357,18 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check-config", help="validate the contract without ML imports or downloads")
     check.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    preflight = commands.add_parser("preflight", help="validate the host without model or dataset downloads")
+    preflight.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    preflight.add_argument("--expected-commit", required=True)
+    preflight.add_argument("--output-root", type=Path, default=Path("artifacts/mark2"))
+    preflight.add_argument("--run-id", help="unique artifact directory name")
     run = commands.add_parser("run", help="run evaluation and always preserve a manifest")
     run.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     run.add_argument("--backend", choices=("mock", "transformers"), default="transformers")
     run.add_argument("--output-root", type=Path, default=Path("artifacts/mark2"))
     run.add_argument("--run-id", help="unique artifact directory name")
+    run.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    run.add_argument("--expected-commit", help="approved repository commit; required by transformers backend")
     compare = commands.add_parser("compare", help="apply the configured reproducibility tolerance to two runs")
     compare.add_argument("first", type=Path)
     compare.add_argument("second", type=Path)
@@ -337,10 +394,26 @@ def main() -> int:
             print(payload, end="")
             return 0 if result["reproducible"] else 1
 
+        if args.command == "preflight":
+            run_id = args.run_id or datetime.now(timezone.utc).strftime("preflight-%Y%m%dT%H%M%SZ-") + uuid4().hex[:8]
+            report_path, report = execute_preflight(
+                args.profile, args.expected_commit, args.output_root, run_id
+            )
+            print(report_path)
+            return 0 if report["passed"] else 1
+
         config = read_config(args.config)
         run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid4().hex[:8]
         backend = MockBackend() if args.backend == "mock" else TransformersBackend()
-        run_dir = execute_run(config, args.config, args.output_root, run_id, backend)
+        run_dir = execute_run(
+            config,
+            args.config,
+            args.output_root,
+            run_id,
+            backend,
+            expected_commit=args.expected_commit,
+            profile_path=args.profile,
+        )
         print(run_dir)
         return 0
     except (OSError, ValueError, RuntimeError) as exc:
