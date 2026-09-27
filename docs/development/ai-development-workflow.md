@@ -128,9 +128,8 @@ statusを維持する。
 
 ## Scheduler
 
-初期schedulerはsystemd user timerを採用する。対象machine内で完結し、外部
-infrastructureや有料resourceを追加せず、再起動後のcatch-upとjournalを利用
-できるためである。
+初期schedulerはsystemd user timerを採用する。対象machine内で完結し、
+再起動後のcatch-upとjournalを利用できるためである。
 
 scheduler/systemd/ai-development.serviceは %h/project/AI を標準配置としている。
 repository pathが異なる場合は、serviceのWorkingDirectory、Environment、

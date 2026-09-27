@@ -14,5 +14,5 @@ IMPLEMENTでは、現在のIssue本文に対するAI Issue ReviewがAPPROVEDで�
 
 PR_REVISEでは、既存のPR branchを使い、現在のreview指摘に対応してください。必要な検証、commit、pushを行い、変更と検証結果を読みやすいMarkdown comment 1件にまとめてください。別のPRは作成しません。
 
-mainへの直接push、PRのmerge、credentialの公開、有料resourceの作成、外部infrastructureの変更は禁止です。必要な権限や情報がなければ停止してblockerを報告してください。各writeの直前にGitHubを確認し、Issue、comment、branch、PRの重複を避けてください。
+mainへの直接push、PRのmerge、credentialの公開は禁止です。必要な権限や情報がなければ停止してblockerを報告してください。各writeの直前にGitHubを確認し、Issue、comment、branch、PRの重複を避けてください。
 """
