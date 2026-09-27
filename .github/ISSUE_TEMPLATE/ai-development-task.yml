@@ -1,0 +1,78 @@
+name: AI development task
+description: GOALと現在のrepositoryとの差分から作るAI開発task
+title: "[AI task] "
+labels:
+  - codex
+body:
+  - type: markdown
+    attributes:
+      value: |
+        このIssueはAI開発workflowのIssue Review対象です。各項目を一次情報に基づいて記載してください。
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+      description: なぜ今この作業が必要かを記載してください。
+      value: |
+        <!-- ai-workflow:task -->
+
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: GOALとの関係
+      description: GOAL.mdのどの差分を縮めるかを記載してください。
+    validations:
+      required: true
+  - type: textarea
+    id: current_state
+    attributes:
+      label: 現状
+      description: repository、Issue、PR、実験結果など確認した一次情報を記載してください。
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: 解決すべき差分
+    validations:
+      required: true
+  - type: textarea
+    id: work
+    attributes:
+      label: 実施内容
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of Scope
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+      description: 客観的に確認できるcheckboxで記載してください。
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: 検証方法
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 関連ファイル・Issue
+      description: 関連するpath、Issue、PR、decisionを記載してください。

@@ -1,0 +1,37 @@
+default_permissions = "main-agent"
+
+[permissions.main-agent]
+description = "Read-only repository and network access for Main Agent routing."
+extends = ":read-only"
+
+[permissions.main-agent.network]
+enabled = true
+
+[permissions.work-agent]
+description = "Repository and Git metadata writes plus network access for the Work Agent."
+extends = ":workspace"
+
+[permissions.work-agent.filesystem]
+glob_scan_max_depth = 64
+
+[permissions.work-agent.filesystem.":workspace_roots"]
+"." = "write"
+".git" = "write"
+".codex" = "read"
+".agents" = "read"
+".env*" = "deny"
+"**/.env*" = "deny"
+
+[permissions.work-agent.network]
+enabled = true
+
+[permissions.review-agent]
+description = "Read-only repository and network access for independent reviews."
+extends = ":read-only"
+
+[permissions.review-agent.filesystem]
+":tmpdir" = "write"
+":slash_tmp" = "write"
+
+[permissions.review-agent.network]
+enabled = true
