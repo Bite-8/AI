@@ -76,6 +76,8 @@ PR #31では次の二段階が承認済みである。
 
 各runはcommit、作業ツリー、環境、依存、GPU、source hash、時間、peak memory、予測、metric、成否をrun ID別artifactへ保存する。mock結果は`mock-only`、未実行の実機結果は`unverified`として区別する。
 
+実機hostの承認済み条件は [`mark2/configs/qwen35_9b_l4_profile.json`](../../mark2/configs/qwen35_9b_l4_profile.json) に固定する。Python 3.10以上、`mark2/requirements.txt`のexact pin、CUDA/BF16、NVIDIA L4 1基、22,500 MiB以上のVRAM、開始時100 GiB以上の空き容量を要求する。実行時には別途、承認対象となったrepository commitの完全なSHAを渡す。
+
 ## 実行方法
 
 無料の事前検査:
@@ -88,11 +90,24 @@ python3 -m mark2.run run --backend mock --run-id mock-2
 python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 ```
 
-Humanによる二段階の承認後、Python 3.10以上の隔離環境と `mark2/requirements.txt` の固定依存を使い、同じcommit・machineで実機runを2回行う。
+Humanによる二段階の承認後、Python 3.10以上の隔離環境と `mark2/requirements.txt` の固定依存を使う。承認されたcommit SHAを記録し、modelまたはdatasetを取得する前にhost preflightを実行する。
 
 ```bash
-python3 -m mark2.run run --backend transformers --run-id baseline-01
-python3 -m mark2.run run --backend transformers --run-id baseline-02
+EXPECTED_COMMIT=<承認された40文字のcommit SHA>
+python3 -m mark2.run preflight \
+  --expected-commit "$EXPECTED_COMMIT" \
+  --run-id baseline-preflight
+```
+
+preflightは各条件の期待値、実測値、合否、理由を`artifacts/mark2/baseline-preflight/preflight.json`へ保存する。全条件合格時だけexit code 0となる。失敗時もartifactは残り、同じrun IDでは上書きしない。CPU-only hostで実行した場合はCUDA/GPU条件を理由としてdownload前にnon-zeroで停止する。
+
+preflightのJSONが合格であることを確認してから、同じcommit・machineで実機runを2回行う。本実行もdownload前に同じgateを再評価するため、承認commitを各runへ渡す。
+
+```bash
+python3 -m mark2.run run --backend transformers \
+  --expected-commit "$EXPECTED_COMMIT" --run-id baseline-01
+python3 -m mark2.run run --backend transformers \
+  --expected-commit "$EXPECTED_COMMIT" --run-id baseline-02
 python3 -m mark2.run compare \
   artifacts/mark2/baseline-01 \
   artifacts/mark2/baseline-02 \

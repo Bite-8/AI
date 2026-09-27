@@ -1,11 +1,43 @@
 import json
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
 from mark2 import run
 from mark2.config import read_config, validate_config
+from mark2.environment import evaluate_preflight, read_profile
+
+
+EXPECTED_COMMIT = "a" * 40
+
+
+class FakeProbe:
+    def __init__(self, **overrides):
+        self.values = {
+            "git_commit": EXPECTED_COMMIT,
+            "git_tracked_status": "",
+            "python_version": [3, 10, 14],
+            "packages": {
+                "accelerate": "1.15.0",
+                "datasets": "5.0.1",
+                "safetensors": "0.8.0",
+                "torch": "2.14.0",
+                "transformers": "5.17.0",
+            },
+            "disk_free_bytes": 200 * 1024**3,
+            "accelerator": {
+                "cuda_available": True,
+                "bf16_supported": True,
+                "gpu_count": 1,
+                "gpus": [{"name": "NVIDIA L4", "memory_total_mib": 23034}],
+            },
+        }
+        self.values.update(overrides)
+
+    def snapshot(self):
+        return deepcopy(self.values)
 
 
 class ConfigTests(unittest.TestCase):
@@ -75,6 +107,92 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(manifest["status"], "failed")
             self.assertEqual(manifest["error"]["type"], "RuntimeError")
             self.assertTrue(manifest["partial_marker"])
+
+
+class PreflightTests(unittest.TestCase):
+    def setUp(self):
+        self.profile = read_profile(run.DEFAULT_PROFILE)
+
+    def test_approved_host_passes_with_machine_readable_checks(self):
+        result = evaluate_preflight(self.profile, EXPECTED_COMMIT, FakeProbe())
+        self.assertTrue(result["passed"])
+        self.assertTrue(result["checks"])
+        self.assertTrue(all({"name", "expected", "actual", "passed", "reason"} == set(item) for item in result["checks"]))
+
+    def test_profile_dependency_pins_match_requirements(self):
+        requirements = {}
+        for line in (run.PACKAGE_DIR / "requirements.txt").read_text(encoding="utf-8").splitlines():
+            name, version = line.split("==", 1)
+            requirements[name] = version
+        self.assertEqual(self.profile["packages"], requirements)
+
+    def test_each_host_contract_mismatch_is_rejected(self):
+        cases = {
+            "git_commit": {"git_commit": "b" * 40},
+            "git_tracked_files_clean": {"git_tracked_status": " M mark2/run.py"},
+            "python_version": {"python_version": [3, 9, 20]},
+            "package:torch": {"packages": {**FakeProbe().values["packages"], "torch": "0.0.0"}},
+            "cuda_available": {"accelerator": {"cuda_available": False, "bf16_supported": False, "gpu_count": 0, "gpus": []}},
+            "bf16_supported": {"accelerator": {"cuda_available": True, "bf16_supported": False, "gpu_count": 1, "gpus": [{"name": "NVIDIA L4", "memory_total_mib": 23034}]}},
+            "gpu_count": {"accelerator": {"cuda_available": True, "bf16_supported": True, "gpu_count": 2, "gpus": [{"name": "NVIDIA L4", "memory_total_mib": 23034}] * 2}},
+            "gpu_name": {"accelerator": {"cuda_available": True, "bf16_supported": True, "gpu_count": 1, "gpus": [{"name": "Different GPU", "memory_total_mib": 23034}]}},
+            "gpu_memory_total_mib": {"accelerator": {"cuda_available": True, "bf16_supported": True, "gpu_count": 1, "gpus": [{"name": "NVIDIA L4", "memory_total_mib": 20000}]}},
+            "disk_free_bytes": {"disk_free_bytes": 99 * 1024**3},
+        }
+        for expected_failure, override in cases.items():
+            with self.subTest(expected_failure=expected_failure):
+                result = evaluate_preflight(self.profile, EXPECTED_COMMIT, FakeProbe(**override))
+                self.assertFalse(result["passed"])
+                failures = {item["name"] for item in result["checks"] if not item["passed"]}
+                self.assertIn(expected_failure, failures)
+
+    def test_failed_preflights_are_saved_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            path, result = run.execute_preflight(
+                run.DEFAULT_PROFILE,
+                EXPECTED_COMMIT,
+                root,
+                "failed-preflight",
+                FakeProbe(disk_free_bytes=0),
+            )
+            self.assertFalse(result["passed"])
+            self.assertFalse(json.loads(path.read_text(encoding="utf-8"))["passed"])
+            with self.assertRaises(FileExistsError):
+                run.execute_preflight(
+                    run.DEFAULT_PROFILE, EXPECTED_COMMIT, root, "failed-preflight", FakeProbe()
+                )
+
+    def test_transformers_run_stops_before_backend_loader_on_failure(self):
+        class LoaderBackend:
+            name = "transformers"
+
+            def __init__(self):
+                self.called = False
+
+            def run(self, config, manifest, run_dir):
+                self.called = True
+                raise AssertionError("loader must not be reached")
+
+        backend = LoaderBackend()
+        config = read_config(run.DEFAULT_CONFIG)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with self.assertRaisesRegex(RuntimeError, "host preflight failed"):
+                run.execute_run(
+                    config,
+                    run.DEFAULT_CONFIG,
+                    root,
+                    "gated",
+                    backend,
+                    expected_commit=EXPECTED_COMMIT,
+                    preflight_probe=FakeProbe(accelerator={"cuda_available": False, "bf16_supported": False, "gpu_count": 0, "gpus": []}),
+                )
+            self.assertFalse(backend.called)
+            report = json.loads((root / "gated" / "preflight.json").read_text(encoding="utf-8"))
+            manifest = json.loads((root / "gated" / "manifest.json").read_text(encoding="utf-8"))
+            self.assertFalse(report["passed"])
+            self.assertEqual(manifest["status"], "failed")
 
 
 class TransformersBackendTests(unittest.TestCase):
