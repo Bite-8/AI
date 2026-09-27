@@ -62,7 +62,6 @@ result_file=$(mktemp /tmp/ai-development-result.XXXXXX)
 set +e
 codex exec \
     --strict-config \
-    --ephemeral \
     --sandbox danger-full-access \
     -c 'approval_policy="never"' \
     -C "$repository" \
@@ -73,6 +72,8 @@ Run one iteration of the AI development Main Agent defined in AGENTS.md.
 Inspect the current repository and GitHub state, choose at most one state transition, and use exactly one project custom subagent named `work` or `review` when the routing rules require delegated work. Wait for that subagent and do not perform its development or review work yourself. A direct, mechanical merge retry for an already Human-approved `ai:human-review` PR is the only GitHub mutation the Main Agent may perform without a subagent.
 
 Do not simulate the workflow. Operate on the real repository and GitHub state. End with the required RESULT line and concise summary.
+
+The entry point already supplied a fresh GH_TOKEN. Do not run `gh auth status`, print environment variables, or otherwise display credentials. Verify GitHub access only through the repository queries needed for routing.
 EOF
 codex_status=$?
 set -e
