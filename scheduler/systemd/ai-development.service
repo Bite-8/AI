@@ -1,0 +1,11 @@
+[Unit]
+Description=Run one AI development routing cycle
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/project/AI
+Environment=AI_DEVELOPMENT_REPO=%h/project/AI
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/project/AI/scripts/run-ai-development.sh

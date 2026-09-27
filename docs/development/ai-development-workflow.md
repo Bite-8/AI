@@ -1,186 +1,171 @@
 # AI駆動開発workflow
 
-## 目的と初期構成
+## 目的
 
-`GOAL.md`と現在のrepositoryの差分から、次の最小loopを継続する。
+GOAL.mdと現在のrepositoryの差分から、次の最小loopを継続する。
 
-```text
-Scheduled Task
-  -> Main Agent（状態判定とroutingのみ）
-      -> Work Agent（Issue作成・修正、または実装・PR作成・修正）
-      -> Review Agent（Issue Review、またはPR Review）
-  -> Human Gate
-  -> Humanがmerge
-```
+    systemd timer
+      -> scripts/run-ai-development.sh
+        -> Main Agent（状態判定とroutingのみ）
+          -> Work Agent（Issue作成・修正、実装・PR作成・修正）
+          -> Review Agent（Issue ReviewまたはPR Review）
+      -> 既存のbranch protection / CODEOWNERS
+      -> Humanがmerge
 
-初期構成はMain、Work、Reviewの3役だけとする。Explorer、Planner、
-Implementerなどへの細分化、並列実行、独自controller、task graph、状態DB、
-事前のSkill作成は行わない。
+Main、Work、Reviewの3役だけを使う。ExplorerやPlannerへの細分化、並列実行、
+独自controller、task graph、状態DB、事前のSkill作成は行わない。
 
-## Source of truth
+## 構成file
 
-- Goal: `GOAL.md`
-- 作業計画と完了条件: GitHub Issue
-- 実装と検証結果: GitHub Pull Requestとdiff
-- 機械検証: GitHub Actions
-- 共通規則: `AGENTS.md`
-- local権限: `.codex/config.toml`のMain、Work、Review用permission profile
-- Agent定義: `.codex/agents/work-agent.toml`と
-  `.codex/agents/review-agent.toml`
-- Main Agent prompt: `.codex/prompts/ai-development-loop.md`
-
-AI workflowのIssueは`codex` labelと`<!-- ai-workflow:task -->`を持つ。
-対応PRは`<!-- ai-workflow:pr -->`を持つ。既存のIssueとPRをそのまま使い、
-別の進捗fileへ状態を複製しない。
-
-## Review状態の記録
-
-### Issue Review
-
-Review Agentは次のcommandでIssueのtitleとbodyのcanonical hashを計算する。
-
-```bash
-gh issue view <number> --json title,body \
-  --jq '.title + "\n" + .body' | sha256sum
-```
-
-Review commentの末尾を次の形式にする。
-
-```markdown
-<!-- ai-workflow:issue-review -->
-AI_WORKFLOW_ISSUE_REVIEW
-- verdict: APPROVED
-- issue_hash: <64文字のsha256>
-```
-
-`verdict`は`APPROVED`または`CHANGES_REQUESTED`だけを使う。Main Agentが
-同じcommandで計算したhashと一致する最新commentだけが有効である。Issue
-本文を変更するとreviewは自動的に古くなる。
-
-### PR Review
-
-Review AgentはGitHubのApproveを代行せず、review commentの末尾を次の形式に
-する。
-
-```markdown
-<!-- ai-workflow:pr-review -->
-AI_WORKFLOW_PR_REVIEW
-- verdict: APPROVED
-- head_sha: <40文字のfull head SHA>
-```
-
-`head_sha`が現在のPR headと一致する最新reviewだけが有効である。push後は
-再reviewが必要になる。
-
-## Human Gate
-
-AI ReviewはHuman Gateを置き換えない。
-
-1. Issue実装前に、AI Issue Reviewが`APPROVED`であることに加え、GitHub
-   user `bara8383`による`/approve-issue` commentを必要とする。
-2. merge前に、AI PR Reviewが`APPROVED`であることに加え、`bara8383`が
-   現在のhead commitへ行ったGitHubのApprove reviewを必要とする。
-3. AgentはPRをmergeしない。Humanがmergeする。
-
-CODEOWNERS、branch ruleset、sandbox、credential、課金resourceに対する既存
-制約を弱めない。有料resourceや外部systemの変更はIssue承認と別の明示承認を
-必要とする。
-
-## 状態遷移
-
-Main Agentは毎回read-onlyのGit/GitHub queryでremoteとrepositoryの状態を再取得
-する。Git metadataは変更しない。次の順で最初に該当する遷移を1つだけ実行し、
-終了する。
-
-| 現在状態 | 起動するAgent / 終了状態 |
+| file | 役割 |
 |---|---|
-| PRに後続のWork回答・commitがないHuman指摘、AI changes requested、success以外で完了したCIがある | Work: `PR_REVISE` |
-| PRに現在headのAI reviewがない | Review: `PR_REVIEW` |
-| AI PR review済み、Human Approveなし | `AWAITING_HUMAN_PR_REVIEW` |
-| AI/Human review済み、現在headの全expected CIがsuccess | `AWAITING_HUMAN_MERGE` |
-| AI/Human review済み、現在headのexpected CIが未開始または実行中 | `AWAITING_CI` |
-| IssueにAI changes requested、または後続のWork回答・本文更新がないHuman修正がある | Work: `ISSUE_REVISE` |
-| Issueに現在本文のAI reviewがない | Review: `ISSUE_REVIEW` |
-| AI Issue review済み、Human承認なし | `AWAITING_HUMAN_ISSUE_APPROVAL` |
-| AI/Human承認済みIssueにPRがない | Work: `IMPLEMENT` |
-| 処理対象がない | Work: `ISSUE_CREATE` |
+| .codex/prompts/ai-development-loop.md | Main Agentのstate machineとrouting rule |
+| .codex/agents/work-agent.toml | Issue作成・修正、承認済みIssueの実装、PR作成・修正 |
+| .codex/agents/review-agent.toml | 独立contextでのIssue ReviewとPR Review |
+| .github/ISSUE_TEMPLATE/autonomous-development.yml | AI開発Issue Form |
+| .github/pull_request_template.md | 実装PRの説明項目 |
+| scripts/run-ai-development.sh | Codexを1回起動するentry point |
+| scheduler/systemd/ai-development.service | entry pointを起動するuser service |
+| scheduler/systemd/ai-development.timer | 起動5分後と毎正時にserviceを起動するscheduler |
+| .codex/config.toml | Main、Work、Reviewのlocal permission profile |
 
-既存PR、既存Issue、新規Issueの順に優先する。同一hashまたはhead SHAに対して
-同じ処理を重複実行しない。Main Agent自身は成果物を作らず、custom agentを
-1つだけ起動する。
+GitHub IssueとPRをsource of truthとし、別の進捗fileへ状態を複製しない。
+AI workflowのIssueはcodex labelと <!-- ai-workflow:task -->、PRは
+<!-- ai-workflow:pr --> を持つ。
 
 ## Agentの責務
 
+### Main Agent
+
+GitHubとrepositoryの状態をread-onlyで再取得し、優先順位表の最初に該当する
+phaseへWork AgentまたはReview Agentを1つだけ起動する。Main Agent自身は
+Issue作成、review、実装、commit、pushを行わない。起動したAgentが終了したら
+成果物を確認してrunを終了し、同じrunで次のphaseへ進まない。
+
 ### Work Agent
 
-- GOALと現状の差分から、重複しないIssueを1件作る
-- review指摘を受けたIssue本文を修正する
-- AIとHumanの両方が承認したIssueを実装し、test、commit、push、PR作成まで行う
-- PRの指摘またはCI失敗を既存branchで修正する
+- ISSUE_CREATE: GOALと現状の最小の差分をIssue 1件にする
+- ISSUE_REVISE: review指摘をIssueへ反映する
+- IMPLEMENT: AI Reviewで承認済みのIssueを専用branchで実装し、検証、commit、
+  push、PR作成まで行う
+- PR_REVISE: 既存PR branchで指摘を修正し、検証、commit、push、Markdownでの
+  対応報告まで行う
+
+Work Agentはmainへ直接pushせず、PRをmergeしない。
 
 ### Review Agent
 
-- Work Agentと別contextで、GOAL、repository、Issue、PR diff、test、CI、規則を
-  一次情報から確認する
-- Issueの優先度、順序、明確さ、粒度、重複、完了条件、検証方法を確認する
-- PRの要求充足、scope、設計整合、bug、回帰、test、文書、完了条件を確認する
-- read-only permission profileを使い、成果物を変更しない
+Work Agentと別contextで、GOAL、repository、Issue、PR diff、検証結果、規則を
+一次情報から確認する。
 
-read-only profileはlocal file変更を抑止するが、共有credentialによるremote
-writeまで分離する境界ではない。このためReview Agentのremote writeも対象への
-review comment 1件だけに制限する。
+- ISSUE_REVIEW: 優先度、順序、明確さ、粒度、重複、完了条件、検証方法を確認
+- PR_REVIEW: 要求充足、scope、設計整合、bug、回帰、test、文書を確認
 
-`.codex/config.toml`ではMainとReviewをrepository read-only、Workだけをrepositoryと
-Git metadataへwrite可能にする。Reviewはtest用の一時directoryだけwriteできる。
-Workの`.codex/`と`.agents/`はread-only、全階層の`.env`派生fileはdenyとする。
-GitHub操作とcredential helperに必要なnetwork accessは3 profileへ許可する。
-permission profileとlegacyの`sandbox_mode`は併用できないため、Scheduled Taskでは
-projectのCustom設定を選び、別のpermission modeで上書きしない。
+成果物は編集せず、指定された対象へのreview comment 1件だけを投稿する。
 
-## Scheduled Taskの登録
+## Review状態
 
-Scheduled Taskはrepository fileだけでは作成できない。PR merge後、ChatGPTまたは
-Codex desktop appのScheduled画面で次のように1件登録する。
+Issue Reviewはtitleとbodyのhashへ結び付ける。
 
-- 種類: standalone（runごとに新しいchat）
-- 対象project: このrepository
-- 実行場所: dedicated background worktree
-- Permissions: Custom（projectの`.codex/config.toml`を使用）
-- 頻度: まず1時間ごと。最初の数runを確認後に調整する
-- saved prompt:
+    gh issue view <number> --json title,body \
+      --jq '.title + "\n" + .body' | sha256sum
 
-```text
-Read .codex/prompts/ai-development-loop.md completely and execute exactly one routing cycle. Follow AGENTS.md and do not continue to a second phase in the same run.
-```
+comment末尾は次の形式とする。
 
-permission profileはGitHubとcredential helperに必要なcommand network accessを
-許可する。Agent instructionではそれ以外のnetwork利用を禁止する。PCとdesktop
-appが起動しており、project pathが存在する必要がある。
+    <!-- ai-workflow:issue-review -->
+    AI_WORKFLOW_ISSUE_REVIEW
+    - verdict: APPROVED
+    - issue_hash: <64文字のsha256>
+
+PR Reviewは現在のhead SHAへ結び付ける。
+
+    <!-- ai-workflow:pr-review -->
+    AI_WORKFLOW_PR_REVIEW
+    - verdict: APPROVED
+    - head_sha: <40文字のfull head SHA>
+
+verdictはAPPROVEDまたはCHANGES_REQUESTEDだけを使う。Issue本文の変更または
+PRへのpush後は、以前のreviewを無効として再reviewする。
+
+## 状態遷移
+
+Main Agentは既存PR、既存Issue、新規Issueの順に優先し、次の最初の1件だけを
+実行する。
+
+| 現在状態 | 次の処理 |
+|---|---|
+| PRに未対応のHuman指摘、または現在headのAI CHANGES_REQUESTEDがある | Work: PR_REVISE |
+| PRに現在headのAI reviewがない | Review: PR_REVIEW |
+| PRに現在headのAI APPROVEDがある | AWAITING_HUMAN_MERGE |
+| Issueに未対応のHuman指摘、または現在本文のAI CHANGES_REQUESTEDがある | Work: ISSUE_REVISE |
+| Issueに現在本文のAI reviewがない | Review: ISSUE_REVIEW |
+| AI APPROVEDのIssueに関連open PRがない | Work: IMPLEMENT |
+| 処理対象がない | Work: ISSUE_CREATE |
+
+同じIssue hashまたはPR head SHAに同じphaseを重複実行しない。
+AWAITING_HUMAN_MERGEでは何も変更しない。merge可否はrepositoryに既に設定された
+branch protectionとCODEOWNERSへ委ねる。このworkflow独自のHuman承認commentや
+CI gateは追加しない。
+
+## 自動実行entry point
+
+scripts/run-ai-development.shはschedulerとCodex CLIの間の固定入口である。
+
+- scriptの配置からrepositoryを解決する。別checkoutでは
+  AI_DEVELOPMENT_REPOで明示できる
+- git directory配下のai-development/run.lockをflockで確保し、重複runを止める
+- AI_DEVELOPMENT_LOG_DIR、未指定時はgit directory配下へrunごとのlogを保存する
+- repository rootをworking directoryにしてcodex execを新規sessionで起動する
+- .codex/config.tomlのpermission profileを使い、legacy sandbox optionで上書きしない
+- Main prompt全体を標準入力から渡し、1 routing cycleで終了する
+
+手動dry run:
+
+    scripts/run-ai-development.sh
+
+同じrepositoryで既にrun中ならexit 75を返す。codexが失敗した場合は、そのexit
+statusを維持する。
+
+## Scheduler
+
+初期schedulerはsystemd user timerを採用する。対象machine内で完結し、外部
+infrastructureや有料resourceを追加せず、再起動後のcatch-upとjournalを利用
+できるためである。
+
+scheduler/systemd/ai-development.serviceは %h/project/AI を標準配置としている。
+repository pathが異なる場合は、serviceのWorkingDirectory、Environment、
+ExecStartを実際のpathへ変更してから登録する。
+Codex CLIを別のdirectoryへinstallしている場合はEnvironmentのPATHも変更する。
+
+    mkdir -p ~/.config/systemd/user
+    cp scheduler/systemd/ai-development.service ~/.config/systemd/user/
+    cp scheduler/systemd/ai-development.timer ~/.config/systemd/user/
+    systemctl --user daemon-reload
+    systemctl --user enable --now ai-development.timer
+    systemctl --user list-timers ai-development.timer
+
+timerはmachine起動5分後と毎正時に実行する。頻度は最初の数runの所要時間とlogを
+確認してから調整する。repositoryをmergeしただけではschedulerは登録されない。
+上記のmachine設定はHumanが行う。
+
+状態確認:
+
+    systemctl --user status ai-development.timer
+    journalctl --user -u ai-development.service
 
 ## 導入確認
 
-### merge前のdry run
+merge前:
 
-1. `python3 -m unittest discover -s tests -v`
-2. `python3 -m mark2.run check-config`
-3. `python3 -m compileall -q mark2 tests`
-4. `git diff --check origin/main...HEAD`
-5. Main promptを通常chatで実行し、Mainが成果物を直接変更せず、最初の該当
-   Agentを1つだけ選ぶことを確認する
+1. python3 -m unittest discover -s tests -v
+2. python3 -m mark2.run check-config
+3. python3 -m compileall -q mark2 tests
+4. sh -n scripts/run-ai-development.sh
+5. systemd-analyze --user verify scheduler/systemd/ai-development.service
+   scheduler/systemd/ai-development.timer
+6. git diff --check origin/main...HEAD
 
-### merge後のend-to-end確認
-
-最初の実taskで、次を順番に確認する。Human Gateがあるため、複数のScheduled
-Task runとHuman操作にまたがる。
-
-- Work Agentがtemplate準拠のIssueを作る
-- Review Agentが現在のIssue hashを含むreviewを残す
-- Humanが`/approve-issue`を投稿する
-- Work Agentが実装、test、commit、push、PR作成を行う
-- Review Agentが現在のhead SHAを含むreviewを残す
-- CIがpassする
-- HumanがApproveし、mergeする
-
-1件完走するまでは初期導入を完了扱いにしない。実運用で同じ長い手順、同じ
-失敗、または独立して改善すべきworkflowが複数回観測された場合だけ、Skill化や
-Agent細分化を別Issueで検討する。
+merge後はtimerを登録し、Issue作成、Issue Review、実装・PR作成、PR Review、
+既存branch protectionを経たHuman mergeまでを実task 1件で確認する。1件完走する
+までは初期導入完了と扱わない。繰り返し発生する手順や失敗を観測してから、
+Skill化やAgent細分化を別Issueで検討する。

@@ -1,4 +1,4 @@
-import re
+import os
 import tomllib
 import unittest
 from pathlib import Path
@@ -12,13 +12,23 @@ class AgentConfigurationTests(unittest.TestCase):
         with (ROOT / ".codex" / "agents" / filename).open("rb") as handle:
             return tomllib.load(handle)
 
-    def test_only_minimal_work_and_review_agents_are_defined(self):
+    def test_only_work_and_review_agents_are_defined(self):
         agent_files = sorted(path.name for path in (ROOT / ".codex" / "agents").glob("*.toml"))
         self.assertEqual(agent_files, ["review-agent.toml", "work-agent.toml"])
         self.assertEqual(self.load_agent("work-agent.toml")["name"], "work_agent")
         self.assertEqual(self.load_agent("review-agent.toml")["name"], "review_agent")
 
-    def test_agents_select_separate_permission_profiles(self):
+    def test_agent_instructions_are_japanese_and_roles_are_complete(self):
+        work = self.load_agent("work-agent.toml")["developer_instructions"]
+        review = self.load_agent("review-agent.toml")["developer_instructions"]
+        for phase in ("ISSUE_CREATE", "IMPLEMENT", "PR_REVISE"):
+            self.assertIn(phase, work)
+        for phase in ("ISSUE_REVIEW", "PR_REVIEW"):
+            self.assertIn(phase, review)
+        self.assertIn("あなたは", work)
+        self.assertIn("あなたは", review)
+
+    def test_agents_use_separate_permission_profiles(self):
         self.assertEqual(
             self.load_agent("review-agent.toml")["default_permissions"], "review-agent"
         )
@@ -26,37 +36,18 @@ class AgentConfigurationTests(unittest.TestCase):
             self.load_agent("work-agent.toml")["default_permissions"], "work-agent"
         )
 
-    def test_permission_profiles_allow_only_work_agent_to_write(self):
-        with (ROOT / ".codex" / "config.toml").open("rb") as handle:
-            config = tomllib.load(handle)
-        permissions = config["permissions"]
-        self.assertEqual(config["default_permissions"], "main-agent")
-        self.assertEqual(permissions["main-agent"]["extends"], ":read-only")
-        self.assertEqual(permissions["review-agent"]["extends"], ":read-only")
-        self.assertEqual(permissions["work-agent"]["extends"], ":workspace")
-        self.assertEqual(permissions["work-agent"]["filesystem"]["glob_scan_max_depth"], 64)
-        work_filesystem = permissions["work-agent"]["filesystem"][":workspace_roots"]
-        self.assertEqual(work_filesystem["."], "write")
-        self.assertEqual(work_filesystem[".git"], "write")
-        self.assertEqual(work_filesystem[".codex"], "read")
-        self.assertEqual(work_filesystem[".env*"], "deny")
-        self.assertEqual(work_filesystem["**/.env*"], "deny")
-        review_filesystem = permissions["review-agent"]["filesystem"]
-        self.assertEqual(review_filesystem[":tmpdir"], "write")
-        self.assertEqual(review_filesystem[":slash_tmp"], "write")
-
-    def test_legacy_sandbox_settings_are_not_mixed_with_permission_profiles(self):
-        paths = [ROOT / ".codex" / "config.toml", *(ROOT / ".codex" / "agents").glob("*.toml")]
-        for path in paths:
-            self.assertNotIn("sandbox_mode", path.read_text(encoding="utf-8"), path)
-
 
 class WorkflowContractTests(unittest.TestCase):
     def read(self, relative_path):
         return (ROOT / relative_path).read_text(encoding="utf-8")
 
-    def test_templates_have_workflow_markers_and_required_sections(self):
-        issue_template = self.read(".github/ISSUE_TEMPLATE/ai-development-task.yml")
+    def test_templates_have_markers_and_required_sections(self):
+        issue_path = ROOT / ".github/ISSUE_TEMPLATE/autonomous-development.yml"
+        self.assertTrue(issue_path.is_file())
+        self.assertFalse(
+            (ROOT / ".github/ISSUE_TEMPLATE/ai-development-task.yml").exists()
+        )
+        issue_template = issue_path.read_text(encoding="utf-8")
         self.assertIn("<!-- ai-workflow:task -->", issue_template)
         self.assertIn("- codex", issue_template)
         for section in (
@@ -88,24 +79,42 @@ class WorkflowContractTests(unittest.TestCase):
         ):
             self.assertIn(section, pr_template)
 
-    def test_main_prompt_routes_exactly_the_two_named_agents(self):
+    def test_main_prompt_is_a_thin_japanese_router(self):
         prompt = self.read(".codex/prompts/ai-development-loop.md")
-        names = set(re.findall(r"`(work_agent|review_agent)`", prompt))
-        self.assertEqual(names, {"work_agent", "review_agent"})
-        self.assertIn("spawn exactly one", prompt)
-        self.assertIn("Never merge it", prompt)
-        self.assertIn("every expected CI check", prompt)
-        self.assertIn("AWAITING_CI", prompt)
+        self.assertIn("work_agent", prompt)
+        self.assertIn("review_agent", prompt)
+        self.assertIn("1つだけ", prompt)
+        self.assertIn("Agentはmergeしない", prompt)
+        self.assertNotIn("/approve-issue", prompt)
+        self.assertNotIn("AWAITING_CI", prompt)
 
     def test_review_markers_bind_to_mutable_artifacts(self):
-        reviewer = self.load_reviewer_instructions()
+        reviewer = self.load_agent_instructions("review-agent.toml")
         self.assertIn("<!-- ai-workflow:issue-review -->", reviewer)
         self.assertIn("issue_hash", reviewer)
         self.assertIn("<!-- ai-workflow:pr-review -->", reviewer)
         self.assertIn("head_sha", reviewer)
 
-    def load_reviewer_instructions(self):
-        with (ROOT / ".codex" / "agents" / "review-agent.toml").open("rb") as handle:
+    def test_entrypoint_and_scheduler_are_present(self):
+        script = ROOT / "scripts/run-ai-development.sh"
+        self.assertTrue(os.access(script, os.X_OK))
+        script_text = script.read_text(encoding="utf-8")
+        self.assertIn("flock -n", script_text)
+        self.assertIn("AI_DEVELOPMENT_LOG_DIR", script_text)
+        self.assertIn("codex exec --strict-config", script_text)
+        service = self.read("scheduler/systemd/ai-development.service")
+        timer = self.read("scheduler/systemd/ai-development.timer")
+        self.assertIn("scripts/run-ai-development.sh", service)
+        self.assertIn("OnCalendar=hourly", timer)
+
+    def test_no_new_github_actions_workflow_is_added(self):
+        self.assertFalse((ROOT / ".github/workflows/ci.yml").exists())
+        runbook = self.read("docs/development/ai-development-workflow.md")
+        self.assertIn("branch protectionとCODEOWNERSへ委ねる", runbook)
+        self.assertIn("CI gateは追加しない", runbook)
+
+    def load_agent_instructions(self, filename):
+        with (ROOT / ".codex" / "agents" / filename).open("rb") as handle:
             return tomllib.load(handle)["developer_instructions"]
 
 

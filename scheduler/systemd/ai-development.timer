@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the AI development loop every hour
+
+[Timer]
+OnBootSec=5min
+OnCalendar=hourly
+Persistent=true
+Unit=ai-development.service
+
+[Install]
+WantedBy=timers.target

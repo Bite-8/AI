@@ -1,4 +1,4 @@
-name: AI development task
+name: Autonomous development task
 description: GOALと現在のrepositoryとの差分から作るAI開発task
 title: "[AI task] "
 labels:
