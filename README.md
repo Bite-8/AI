@@ -6,6 +6,7 @@
 
 - [`mark2/`](mark2/): 個人研究向けprimary baseline Qwen3.5-9Bを固定条件で検証する評価ハーネス
 - [`docs/mark2/README.md`](docs/mark2/README.md): Mark2の選定記録、費用、評価条件、実行手順、結果
+- [`docs/ai-development.md`](docs/ai-development.md): AI駆動開発ループの設計判断、状態遷移、運用方法
 - [`prototypes/numpy_transformer/`](prototypes/numpy_transformer/): 完了済みMark1の教材用NumPy Transformer
 
 ## Mark2 baseline

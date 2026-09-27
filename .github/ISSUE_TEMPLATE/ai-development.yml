@@ -1,0 +1,76 @@
+name: AI development task
+description: GOALとの差分から提案するAI駆動開発用Issue
+title: ""
+labels:
+  - "ai:issue-review"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        AI駆動開発ループの提案Issueです。実装前にReview Agentが一次情報から内容を検証します。
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景
+      description: なぜ今この作業が必要か。
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: GOALとの関係
+      description: GOAL.mdのどの差分を縮めるか。
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: 現状
+      description: Repositoryで確認できる現在の状態。
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: 解決すべき差分
+    validations:
+      required: true
+  - type: textarea
+    id: work
+    attributes:
+      label: 実施内容
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of Scope
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+      description: 客観的に判定できる条件。
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 検証方法
+      description: 実行するテストと確認方法。
+    validations:
+      required: true
+  - type: textarea
+    id: related
+    attributes:
+      label: 関連ファイル・Issue
+      description: 関連するpath、Issue、PR。なければ「なし」。
+    validations:
+      required: true

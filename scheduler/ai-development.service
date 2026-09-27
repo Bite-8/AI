@@ -1,0 +1,17 @@
+[Unit]
+Description=Run one AI-driven development state transition
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ssm-user
+Group=ssm-user
+WorkingDirectory=/home/ssm-user/project/AI
+Environment=HOME=/home/ssm-user
+Environment=PATH=/home/ssm-user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/ssm-user/project/AI/scripts/run-ai-development.sh
+NoNewPrivileges=true
+ProtectSystem=full
+UMask=0077
+TimeoutStartSec=infinity
