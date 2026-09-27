@@ -2,7 +2,7 @@
 Description=Run AI-driven development three hours after the previous run
 
 [Timer]
-OnBootSec=10min
+OnActiveSec=10min
 OnUnitInactiveSec=3h
 Unit=ai-development.service
 
