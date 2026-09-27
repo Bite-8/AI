@@ -8,7 +8,7 @@
 - `.codex/agents/review.toml`: Issue Review、PR Review、merge
 - `scripts/run-ai-development.sh`: 認証・同期・排他・Main Agent起動
 - `scheduler/ai-development.service`: `ssm-user`で実行するoneshot service
-- `scheduler/ai-development.timer`: boot後10分、以後は前回終了から3時間後に起動
+- `scheduler/ai-development.timer`: timer有効化後10分（通常はboot時）、以後は前回終了から3時間後に起動
 
 Subagentのmodelとreasoning effortはMain Agentから継承する。同時に開くSubagent threadは1つに制限するが、GitHub上のworkflow件数には上限を設けない。
 
@@ -19,7 +19,7 @@ Subagentのmodelとreasoning effortはMain Agentから継承する。同時に�
 - **labelだけを状態のsource of truthにする:** 構造化コメントや外部databaseは導入しない。コメントは判断理由と修正指示に使い、Mainは解析しない。初期運用で必要性が確認されるまで状態管理を増やさないためである。
 - **独自のHuman Gateを追加しない:** Issue Review通過後は実装へ進み、PR Review通過後は直ちにmergeを試みる。保護が必要なpathはGitHubのCODEOWNERSとbranch protectionで管理し、GitHubがrequired reviewを要求した場合だけ`ai:human-review`として待つ。
 - **merge commit後にremote branchを削除する:** 現在のRepository履歴に合わせてmerge commit方式を使い、merge済みbranchは残さない。
-- **3時間間隔にする:** boot後10分で開始し、その後は前回の終了から3時間待つ。1回1工程でも通常経路を約9時間で進められ、失敗時の高速retryや重複起動を避けられる。
+- **3時間間隔にする:** timer有効化後10分で開始し、その後は前回の終了から3時間待つ。1回1工程でも通常経路を約9時間で進められ、失敗時の高速retryや重複起動を避けられる。`OnActiveSec`にすることで、稼働済みhostに後から導入しても即時実行せず同じ10分の状態確認時間を確保する。
 - **system serviceとして動かす:** user sessionやloginに依存させず、systemdのoneshot serviceを`User=ssm-user`で実行する。systemdと`flock`の両方で二重起動を防ぐ。
 - **Codexは`danger-full-access`で実行する:** Work Agentが`.git`を更新してcommit・pushする必要があるため、Codexのworkspace sandboxでは完結しない。一方、rootでは実行せず、systemdの`NoNewPrivileges=true`で権限昇格を禁止する。このEC2自体を検証環境として扱う判断である。
 - **modelを固定しない:** WorkとReviewはMainのmodelとreasoning effortを継承する。実運用で品質・速度・費用の差が観測される前に役割別設定を増やさない。
