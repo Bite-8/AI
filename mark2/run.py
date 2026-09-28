@@ -481,13 +481,16 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
             )
         preflight_reference = manifest.get("preflight")
         preflight_checks = preflight.get("checks") if isinstance(preflight, dict) else None
+        saved_profile = preflight.get("profile") if isinstance(preflight, dict) else None
+        expected_commit = preflight.get("expected_commit") if isinstance(preflight, dict) else None
+        observed = preflight.get("observed") if isinstance(preflight, dict) else None
         reevaluated_checks = None
         try:
-            if preflight:
+            if isinstance(saved_profile, dict) and isinstance(expected_commit, str) and isinstance(observed, dict):
                 reevaluated_checks = evaluate_preflight(
-                    preflight["profile"], preflight["expected_commit"], _SavedProbe(preflight["observed"])
+                    saved_profile, expected_commit, _SavedProbe(observed)
                 )["checks"]
-        except (KeyError, TypeError, ValueError):
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
             pass
         reference_valid = (
             isinstance(preflight_reference, dict)
@@ -533,7 +536,6 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
             "saved contract must exactly match the repository's preregistered contract",
         )
 
-        saved_profile = preflight.get("profile") if isinstance(preflight, dict) else None
         profile_fixed = saved_profile == fixed_profile
         _qualification_check(
             checks,
@@ -593,7 +595,8 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         )
 
         selection = manifest.get("dataset_selection")
-        sample_size = contract.get("dataset", {}).get("sample_size") if contract else None
+        contract_dataset = contract.get("dataset") if isinstance(contract, dict) else None
+        sample_size = contract_dataset.get("sample_size") if isinstance(contract_dataset, dict) else None
         hashes_are_valid = all(re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes)
         expected_selection_hash = hashlib.sha256("\n".join(hashes).encode("ascii")).hexdigest() if hashes and hashes_are_valid else None
         selection_valid = (
@@ -624,8 +627,9 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         _qualification_check(
             checks, f"{prefix}.model_artifact_integrity", True, {"chat_template_sha256": chat_hash, "model_config_sha256": model_hash}, content_hashes_valid, "chat template and model config files must match their manifest hashes"
         )
-        preflight_commit = preflight.get("expected_commit") if preflight else None
-        observed_commit = preflight.get("observed", {}).get("git_commit") if preflight else None
+        preflight_commit = preflight.get("expected_commit") if isinstance(preflight, dict) else None
+        observed = preflight.get("observed") if isinstance(preflight, dict) else None
+        observed_commit = observed.get("git_commit") if isinstance(observed, dict) else None
         commit_consistent = manifest.get("git_commit") == preflight_commit == observed_commit
         _qualification_check(
             checks,
@@ -657,12 +661,12 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
 
     fixed_host = []
     for preflight in preflights:
-        observed = preflight.get("observed", {}) if preflight else {}
+        observed = preflight.get("observed") if isinstance(preflight, dict) else None
         fixed_host.append({
-            "profile": preflight.get("profile") if preflight else None,
-            "python_version": observed.get("python_version"),
-            "packages": observed.get("packages"),
-            "accelerator": observed.get("accelerator"),
+            "profile": preflight.get("profile") if isinstance(preflight, dict) else None,
+            "python_version": observed.get("python_version") if isinstance(observed, dict) else None,
+            "packages": observed.get("packages") if isinstance(observed, dict) else None,
+            "accelerator": observed.get("accelerator") if isinstance(observed, dict) else None,
         })
     _qualification_check(checks, "pair.same_fixed_environment", "identical", fixed_host, fixed_host[0] == fixed_host[1] and fixed_host[0]["profile"] is not None, "dependency, Python, GPU, and execution profile conditions must match")
 
@@ -670,7 +674,11 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
     for rows in predictions:
         signatures.append([(row.get("question_sha256"), row.get("prediction")) for row in rows] if rows else None)
     identical = signatures[0] is not None and signatures[0] == signatures[1]
-    tolerance = manifests[0].get("contract", {}).get("metric", {}).get("reproducibility", {}) if manifests[0] else {}
+    first_contract = manifests[0].get("contract") if isinstance(manifests[0], dict) else None
+    metric = first_contract.get("metric") if isinstance(first_contract, dict) else None
+    tolerance = metric.get("reproducibility") if isinstance(metric, dict) else None
+    if not isinstance(tolerance, dict):
+        tolerance = {}
     accuracies = [item.get("metrics", {}).get("accuracy") if item and isinstance(item.get("metrics"), dict) else None for item in manifests]
     accuracy_delta = abs(accuracies[0] - accuracies[1]) if all(isinstance(value, (int, float)) for value in accuracies) else None
     max_delta = tolerance.get("max_accuracy_delta")

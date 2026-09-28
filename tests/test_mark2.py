@@ -313,6 +313,32 @@ class ArtifactTests(unittest.TestCase):
                 failed_checks = {item["name"] for item in result["checks"] if not item["passed"]}
                 self.assertIn(f"run1.fixed_{case}", failed_checks)
 
+    def test_qualification_cli_reports_malformed_nested_artifacts(self):
+        cases = {
+            "preflight_observed": ("preflight.json", lambda value: value.update(observed=[]), "run2.preflight_passed"),
+            "contract_dataset": ("contract.json", lambda value: value.update(dataset=[]), "run2.contract_schema"),
+        }
+        for name, (filename, mutate, expected_failed_check) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                first, second = root / "first", root / "second"
+                make_measured_artifact(first, "first")
+                make_measured_artifact(second, "second")
+                artifact_path = second / filename
+                value = json.loads(artifact_path.read_text(encoding="utf-8"))
+                mutate(value)
+                run.write_json(artifact_path, value)
+
+                stdout = io.StringIO()
+                with patch.object(
+                    sys, "argv", ["mark2.run", "qualify", str(first), str(second)]
+                ), patch.object(sys, "stdout", stdout):
+                    self.assertEqual(run.main(), 1)
+                report = json.loads(stdout.getvalue())
+                self.assertFalse(report["eligible"])
+                failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+                self.assertIn(expected_failed_check, failed_checks)
+
     def test_qualification_rejects_representative_artifact_tampering(self):
         def change_prediction(manifest, rows):
             rows[0].update(prediction="B", correct=False)
