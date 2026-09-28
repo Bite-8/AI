@@ -112,7 +112,15 @@ python3 -m mark2.run compare \
   artifacts/mark2/baseline-01 \
   artifacts/mark2/baseline-02 \
   --output artifacts/mark2/reproducibility.json
+python3 -m mark2.run qualify \
+  artifacts/mark2/baseline-01 \
+  artifacts/mark2/baseline-02 \
+  --output artifacts/mark2/baseline-qualification.json
 ```
+
+`compare`はmockを含むoffline bookkeeping向けの再現性比較であり、実機baselineの採用判定ではない。実機2 run後は必ず`qualify`を実行する。`qualify`は各runの分類・preflight・contract・source・dataset selection・prediction・metric・model artifactの内部整合性と、2 run間のrun ID、commit、clean tree、固定依存・GPU条件、各hash、予測、accuracy差を検査する。全checkの名前、期待値、実測値、理由、合否と総合`eligible`判定をJSONへ保存し、1件でも不合格ならnon-zeroで終了する。mock-only、unverified、非transformers artifactはここで拒否される。
+
+`baseline-qualification.json`の`eligible`がtrueであることを確認し、実機runのartifact path、commit、accuracy、同JSONをIssue #30へ記録する。falseの場合は不合格checkの`reason`を記録して停止し、artifactをbaselineとして採用しない。
 
 次の場合は条件を変更せず停止し、logとartifactを退避してinstanceとEBSを削除する。
 

@@ -1,4 +1,8 @@
 import json
+import hashlib
+import io
+import shutil
+import sys
 import tempfile
 import unittest
 from copy import deepcopy
@@ -11,6 +15,66 @@ from mark2.environment import evaluate_preflight, read_profile
 
 
 EXPECTED_COMMIT = "a" * 40
+
+
+def make_measured_artifact(path, run_id):
+    path.mkdir()
+    config = read_config(run.DEFAULT_CONFIG)
+    shutil.copyfile(run.DEFAULT_CONFIG, path / "contract.json")
+    (path / "chat_template.txt").write_text("fixed template", encoding="utf-8")
+    model_config = {"model_type": "qwen3_5"}
+    run.write_json(path / "model_config.json", model_config)
+    source_dir = path / "source"
+    source_dir.mkdir()
+    (source_dir / "run.py").write_text("pinned source", encoding="utf-8")
+    source_hashes = {"run.py": hashlib.sha256((source_dir / "run.py").read_bytes()).hexdigest()}
+    rows = []
+    for index in range(config["dataset"]["sample_size"]):
+        rows.append(
+            {
+                "question_sha256": hashlib.sha256(f"question-{index}".encode()).hexdigest(),
+                "subject": "fixture",
+                "target": "A",
+                "prediction": "A",
+                "correct": True,
+                "output_text": "Answer: A",
+                "generation_seconds": 0.1,
+                "index": index,
+                "input_tokens": 10,
+                "output_tokens": 2,
+            }
+        )
+    with (path / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+    question_hashes = [row["question_sha256"] for row in rows]
+    profile = read_profile(run.DEFAULT_PROFILE)
+    preflight = evaluate_preflight(profile, EXPECTED_COMMIT, FakeProbe())
+    run.write_json(path / "preflight.json", preflight)
+    manifest = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "status": "completed",
+        "backend": "transformers",
+        "result_classification": "repository-measured",
+        "contract_sha256": run.sha256_json(config),
+        "contract": config,
+        "git_commit": EXPECTED_COMMIT,
+        "git_status": "",
+        "environment": {},
+        "source_sha256": source_hashes,
+        "dataset_selection": {
+            "count": len(rows),
+            "question_hashes": question_hashes,
+            "sha256": hashlib.sha256("\n".join(question_hashes).encode("ascii")).hexdigest(),
+        },
+        "chat_template_sha256": hashlib.sha256(b"fixed template").hexdigest(),
+        "model_config_sha256": run.sha256_json(model_config),
+        "runtime": {"backend": "transformers"},
+        "metrics": run.aggregate(rows),
+        "preflight": {"passed": True, "report": "preflight.json", "profile": str(run.DEFAULT_PROFILE)},
+    }
+    run.write_json(path / "manifest.json", manifest)
 
 
 class FakeProbe:
@@ -107,6 +171,82 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(manifest["status"], "failed")
             self.assertEqual(manifest["error"]["type"], "RuntimeError")
             self.assertTrue(manifest["partial_marker"])
+
+    def test_repository_measured_runs_are_qualified_with_complete_report(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first, second = root / "first", root / "second"
+            make_measured_artifact(first, "first")
+            make_measured_artifact(second, "second")
+            result = run.qualify_baseline_runs(first, second)
+            self.assertTrue(result["eligible"])
+            self.assertEqual(result["mode"], "repository-measured-baseline-qualification")
+            self.assertTrue(result["checks"])
+            self.assertTrue(all({"name", "expected", "actual", "passed", "reason"} == set(item) for item in result["checks"]))
+
+    def test_qualification_rejects_representative_artifact_tampering(self):
+        def change_prediction(manifest, rows):
+            rows[0].update(prediction="B", correct=False)
+            manifest["metrics"] = run.aggregate(rows)
+
+        mutations = {
+            "mock_only": lambda manifest, rows: manifest.update(backend="mock", result_classification="mock-only"),
+            "unverified": lambda manifest, rows: manifest.update(result_classification="unverified"),
+            "incomplete": lambda manifest, rows: manifest.update(status="running"),
+            "failed_preflight": lambda manifest, rows: manifest["preflight"].update(passed=False),
+            "dirty_tree": lambda manifest, rows: manifest.update(git_status=" M mark2/run.py"),
+            "contract_hash": lambda manifest, rows: manifest.update(contract_sha256="0" * 64),
+            "source_hash": lambda manifest, rows: manifest["source_sha256"].update({"run.py": "0" * 64}),
+            "dataset_hash": lambda manifest, rows: manifest["dataset_selection"].update(sha256="0" * 64),
+            "chat_template_hash": lambda manifest, rows: manifest.update(chat_template_sha256="0" * 64),
+            "model_config_hash": lambda manifest, rows: manifest.update(model_config_sha256="0" * 64),
+            "missing_prediction_field": lambda manifest, rows: rows[0].pop("target"),
+            "wrong_prediction_type": lambda manifest, rows: rows[0].update(target=1),
+            "prediction_count": lambda manifest, rows: rows.pop(),
+            "duplicate_question": lambda manifest, rows: rows.__setitem__(1, {**rows[1], "question_sha256": rows[0]["question_sha256"]}),
+            "incorrect_metric": lambda manifest, rows: manifest["metrics"].update(accuracy=0.0),
+            "different_prediction": change_prediction,
+            "different_commit": lambda manifest, rows: manifest.update(git_commit="b" * 40),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                first, second = root / "first", root / "second"
+                make_measured_artifact(first, "first")
+                make_measured_artifact(second, "second")
+                manifest = json.loads((second / "manifest.json").read_text(encoding="utf-8"))
+                rows = run._predictions(second / "predictions.jsonl")
+                mutate(manifest, rows)
+                run.write_json(second / "manifest.json", manifest)
+                with (second / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                    for row in rows:
+                        handle.write(json.dumps(row) + "\n")
+                result = run.qualify_baseline_runs(first, second)
+                self.assertFalse(result["eligible"])
+                self.assertTrue(any(not item["passed"] for item in result["checks"]))
+
+    def test_qualification_rejects_same_run_and_cli_returns_nonzero(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first, second = root / "first", root / "second"
+            make_measured_artifact(first, "same")
+            make_measured_artifact(second, "same")
+            with patch.object(sys, "argv", ["mark2.run", "qualify", str(first), str(second)]), patch.object(sys, "stdout", io.StringIO()):
+                self.assertEqual(run.main(), 1)
+
+    def test_qualification_rejects_different_fixed_environment(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first, second = root / "first", root / "second"
+            make_measured_artifact(first, "first")
+            make_measured_artifact(second, "second")
+            profile = read_profile(run.DEFAULT_PROFILE)
+            changed_probe = FakeProbe(python_version=[3, 11, 9])
+            run.write_json(second / "preflight.json", evaluate_preflight(profile, EXPECTED_COMMIT, changed_probe))
+            result = run.qualify_baseline_runs(first, second)
+            self.assertFalse(result["eligible"])
+            failed = {item["name"] for item in result["checks"] if not item["passed"]}
+            self.assertIn("pair.same_fixed_environment", failed)
 
 
 class PreflightTests(unittest.TestCase):

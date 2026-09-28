@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
 
-from .config import read_config, sha256_json, validate_run_id
+from .config import read_config, sha256_json, validate_config, validate_run_id
 from .environment import SystemProbe, collect, command, evaluate_preflight, read_profile
 
 
@@ -327,6 +327,334 @@ def _predictions(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def _qualification_check(
+    checks: list[dict[str, Any]], name: str, expected: Any, actual: Any, passed: bool, reason: str
+) -> None:
+    checks.append({"name": name, "expected": expected, "actual": actual, "passed": passed, "reason": reason})
+
+
+def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    if not isinstance(value, dict):
+        return None, "top-level value must be an object"
+    return value, None
+
+
+def _read_prediction_rows(path: Path) -> tuple[list[dict[str, Any]] | None, str | None]:
+    try:
+        values = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    if not all(isinstance(value, dict) for value in values):
+        return None, "every JSONL value must be an object"
+    return values, None
+
+
+def _required_fields(value: dict[str, Any] | None, schema: dict[str, Any]) -> list[str]:
+    if value is None:
+        return list(schema)
+    invalid = []
+    for name, expected_type in schema.items():
+        item = value.get(name)
+        if not isinstance(item, expected_type) or (expected_type is int and isinstance(item, bool)):
+            invalid.append(name)
+    return invalid
+
+
+class _SavedProbe:
+    def __init__(self, observed: dict[str, Any]):
+        self.observed = observed
+
+    def snapshot(self) -> dict[str, Any]:
+        return self.observed
+
+
+def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
+    """Validate whether two artifacts are admissible repository-measured baselines."""
+    paths = (first, second)
+    checks: list[dict[str, Any]] = []
+    manifests: list[dict[str, Any] | None] = []
+    preflights: list[dict[str, Any] | None] = []
+    predictions: list[list[dict[str, Any]] | None] = []
+
+    manifest_schema = {
+        "schema_version": int,
+        "run_id": str,
+        "status": str,
+        "backend": str,
+        "result_classification": str,
+        "contract_sha256": str,
+        "contract": dict,
+        "git_commit": str,
+        "git_status": str,
+        "environment": dict,
+        "source_sha256": dict,
+        "dataset_selection": dict,
+        "chat_template_sha256": str,
+        "model_config_sha256": str,
+        "runtime": dict,
+        "metrics": dict,
+        "preflight": dict,
+    }
+    prediction_schema = {
+        "question_sha256": str,
+        "subject": str,
+        "target": str,
+        "prediction": (str, type(None)),
+        "correct": bool,
+        "output_text": str,
+        "generation_seconds": (int, float),
+        "index": int,
+        "input_tokens": int,
+        "output_tokens": int,
+    }
+
+    for index, path in enumerate(paths, 1):
+        prefix = f"run{index}"
+        manifest, manifest_error = _read_json_object(path / "manifest.json")
+        contract, contract_error = _read_json_object(path / "contract.json")
+        preflight, preflight_error = _read_json_object(path / "preflight.json")
+        rows, predictions_error = _read_prediction_rows(path / "predictions.jsonl")
+        manifests.append(manifest)
+        preflights.append(preflight)
+        predictions.append(rows)
+
+        for kind, error in (
+            ("manifest", manifest_error),
+            ("contract", contract_error),
+            ("preflight", preflight_error),
+            ("predictions", predictions_error),
+        ):
+            _qualification_check(
+                checks, f"{prefix}.{kind}_readable", "valid data", error, error is None, f"{kind} artifact must be readable"
+            )
+
+        missing = _required_fields(manifest, manifest_schema)
+        _qualification_check(
+            checks, f"{prefix}.manifest_schema", [], missing, not missing, "manifest must contain every required field with the expected type"
+        )
+        if manifest is None:
+            continue
+
+        manifest_values_valid = (
+            manifest.get("schema_version") == 1
+            and isinstance(manifest.get("run_id"), str)
+            and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", manifest["run_id"]))
+            and isinstance(manifest.get("git_commit"), str)
+            and bool(re.fullmatch(r"[0-9a-f]{40}", manifest["git_commit"]))
+            and isinstance(manifest.get("contract_sha256"), str)
+            and bool(re.fullmatch(r"[0-9a-f]{64}", manifest["contract_sha256"]))
+            and isinstance(manifest.get("runtime"), dict)
+            and manifest["runtime"].get("backend") == "transformers"
+        )
+        _qualification_check(
+            checks,
+            f"{prefix}.manifest_values",
+            "valid schema version, IDs, hashes, and runtime backend",
+            None if manifest_values_valid else "one or more values are invalid",
+            manifest_values_valid,
+            "manifest identifiers, hashes, and runtime must use the emitted formats",
+        )
+
+        for name, expected in (
+            ("status", "completed"),
+            ("backend", "transformers"),
+            ("result_classification", "repository-measured"),
+        ):
+            _qualification_check(
+                checks, f"{prefix}.{name}", expected, manifest.get(name), manifest.get(name) == expected, f"{name} must identify a completed measured run"
+            )
+        preflight_reference = manifest.get("preflight")
+        preflight_checks = preflight.get("checks") if isinstance(preflight, dict) else None
+        reevaluated_checks = None
+        try:
+            if preflight:
+                reevaluated_checks = evaluate_preflight(
+                    preflight["profile"], preflight["expected_commit"], _SavedProbe(preflight["observed"])
+                )["checks"]
+        except (KeyError, TypeError, ValueError):
+            pass
+        reference_valid = (
+            isinstance(preflight_reference, dict)
+            and preflight_reference.get("passed") is True
+            and preflight_reference.get("report") == "preflight.json"
+            and isinstance(preflight, dict)
+            and preflight.get("passed") is True
+            and isinstance(preflight_checks, list)
+            and bool(preflight_checks)
+            and all(
+                isinstance(item, dict)
+                and set(item) == {"name", "expected", "actual", "passed", "reason"}
+                and item.get("passed") is True
+                for item in preflight_checks
+            )
+            and preflight_checks == reevaluated_checks
+        )
+        _qualification_check(
+            checks, f"{prefix}.preflight_passed", True, preflight_reference, reference_valid, "manifest and saved preflight must show every host check passed"
+        )
+
+        contract_valid = contract is not None
+        contract_reason = None
+        if contract_valid:
+            try:
+                validate_config(contract)
+            except (KeyError, TypeError, ValueError) as exc:
+                contract_valid, contract_reason = False, str(exc)
+        _qualification_check(
+            checks, f"{prefix}.contract_schema", "valid Mark2 contract", contract_reason, contract_valid, "saved contract must satisfy the pinned contract schema"
+        )
+        hashes_match = contract is not None and manifest.get("contract") == contract and manifest.get("contract_sha256") == sha256_json(contract)
+        _qualification_check(
+            checks, f"{prefix}.contract_integrity", True, hashes_match, hashes_match, "contract file, embedded contract, and declared hash must agree"
+        )
+
+        source_hashes = manifest.get("source_sha256")
+        invalid_sources = []
+        if isinstance(source_hashes, dict) and source_hashes:
+            for filename, expected_hash in source_hashes.items():
+                source_path = path / "source" / filename
+                if (
+                    not isinstance(filename, str)
+                    or Path(filename).name != filename
+                    or not isinstance(expected_hash, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", expected_hash)
+                    or not source_path.is_file()
+                    or source_path.is_symlink()
+                ):
+                    invalid_sources.append(filename)
+                elif hashlib.sha256(source_path.read_bytes()).hexdigest() != expected_hash:
+                    invalid_sources.append(filename)
+        else:
+            invalid_sources.append("source_sha256")
+        _qualification_check(
+            checks, f"{prefix}.source_integrity", [], invalid_sources, not invalid_sources, "source snapshot files must match the manifest hashes"
+        )
+
+        row_errors = []
+        hashes: list[str] = []
+        if rows is not None:
+            for row_index, row in enumerate(rows):
+                invalid = _required_fields(row, prediction_schema)
+                target, prediction, correct = row.get("target"), row.get("prediction"), row.get("correct")
+                if not isinstance(target, str) or target not in "ABCD" or (prediction is not None and (not isinstance(prediction, str) or prediction not in "ABCD")):
+                    invalid.append("answer_value")
+                if isinstance(correct, bool) and correct != (prediction == target):
+                    invalid.append("correct_consistency")
+                for integer_field in ("index", "input_tokens", "output_tokens"):
+                    if isinstance(row.get(integer_field), int) and row[integer_field] < 0:
+                        invalid.append(integer_field)
+                if row.get("index") != row_index:
+                    invalid.append("index_sequence")
+                elapsed = row.get("generation_seconds")
+                if isinstance(elapsed, bool) or (isinstance(elapsed, (int, float)) and elapsed < 0):
+                    invalid.append("generation_seconds")
+                if invalid:
+                    row_errors.append({"row": row_index, "fields": sorted(set(invalid))})
+                if isinstance(row.get("question_sha256"), str):
+                    hashes.append(row["question_sha256"])
+        _qualification_check(
+            checks, f"{prefix}.prediction_schema", [], row_errors, rows is not None and not row_errors, "predictions must contain typed and internally consistent fields"
+        )
+
+        selection = manifest.get("dataset_selection")
+        sample_size = contract.get("dataset", {}).get("sample_size") if contract else None
+        hashes_are_valid = all(re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes)
+        expected_selection_hash = hashlib.sha256("\n".join(hashes).encode("ascii")).hexdigest() if hashes and hashes_are_valid else None
+        selection_valid = (
+            isinstance(selection, dict)
+            and rows is not None
+            and len(rows) == sample_size
+            and selection.get("count") == len(rows)
+            and selection.get("question_hashes") == hashes
+            and selection.get("sha256") == expected_selection_hash
+            and len(set(hashes)) == len(hashes)
+            and hashes_are_valid
+        )
+        _qualification_check(
+            checks, f"{prefix}.dataset_selection_integrity", {"count": sample_size, "unique": True}, selection, selection_valid, "prediction count and unique question hashes must match the contract and selection manifest"
+        )
+
+        metrics = manifest.get("metrics")
+        recalculated = aggregate(rows) if rows is not None and not row_errors else None
+        _qualification_check(
+            checks, f"{prefix}.metric_integrity", recalculated, metrics, metrics == recalculated and recalculated is not None, "manifest metrics must equal metrics recalculated from predictions"
+        )
+
+        chat_path, model_path = path / "chat_template.txt", path / "model_config.json"
+        chat_hash = hashlib.sha256(chat_path.read_bytes()).hexdigest() if chat_path.is_file() else None
+        model_config, _ = _read_json_object(model_path)
+        model_hash = sha256_json(model_config) if model_config is not None else None
+        content_hashes_valid = chat_hash == manifest.get("chat_template_sha256") and model_hash == manifest.get("model_config_sha256")
+        _qualification_check(
+            checks, f"{prefix}.model_artifact_integrity", True, {"chat_template_sha256": chat_hash, "model_config_sha256": model_hash}, content_hashes_valid, "chat template and model config files must match their manifest hashes"
+        )
+        preflight_commit = preflight.get("expected_commit") if preflight else None
+        observed_commit = preflight.get("observed", {}).get("git_commit") if preflight else None
+        commit_consistent = manifest.get("git_commit") == preflight_commit == observed_commit
+        _qualification_check(
+            checks,
+            f"{prefix}.commit_preflight_consistency",
+            manifest.get("git_commit"),
+            {"expected_commit": preflight_commit, "observed_git_commit": observed_commit},
+            commit_consistent,
+            "manifest commit must equal the approved and observed preflight commit",
+        )
+
+    resolved = [str(path.resolve()) for path in paths]
+    run_ids = [item.get("run_id") if item else None for item in manifests]
+    _qualification_check(checks, "pair.distinct_artifact_directories", True, resolved, resolved[0] != resolved[1], "runs must use different artifact directories")
+    _qualification_check(checks, "pair.distinct_run_ids", "different values", run_ids, None not in run_ids and run_ids[0] != run_ids[1], "runs must have independent run IDs")
+
+    pair_fields = (
+        "contract_sha256",
+        "git_commit",
+        "source_sha256",
+        "dataset_selection",
+        "chat_template_sha256",
+        "model_config_sha256",
+    )
+    for field in pair_fields:
+        actual = [item.get(field) if item else None for item in manifests]
+        _qualification_check(checks, f"pair.same_{field}", "identical", actual, actual[0] is not None and actual[0] == actual[1], f"both runs must use the same {field}")
+    statuses = [item.get("git_status") if item else None for item in manifests]
+    _qualification_check(checks, "pair.clean_tracked_tree", ["", ""], statuses, statuses == ["", ""], "both runs must record a clean tracked worktree")
+
+    fixed_host = []
+    for preflight in preflights:
+        observed = preflight.get("observed", {}) if preflight else {}
+        fixed_host.append({
+            "profile": preflight.get("profile") if preflight else None,
+            "python_version": observed.get("python_version"),
+            "packages": observed.get("packages"),
+            "accelerator": observed.get("accelerator"),
+        })
+    _qualification_check(checks, "pair.same_fixed_environment", "identical", fixed_host, fixed_host[0] == fixed_host[1] and fixed_host[0]["profile"] is not None, "dependency, Python, GPU, and execution profile conditions must match")
+
+    signatures = []
+    for rows in predictions:
+        signatures.append([(row.get("question_sha256"), row.get("prediction")) for row in rows] if rows else None)
+    identical = signatures[0] is not None and signatures[0] == signatures[1]
+    tolerance = manifests[0].get("contract", {}).get("metric", {}).get("reproducibility", {}) if manifests[0] else {}
+    accuracies = [item.get("metrics", {}).get("accuracy") if item and isinstance(item.get("metrics"), dict) else None for item in manifests]
+    accuracy_delta = abs(accuracies[0] - accuracies[1]) if all(isinstance(value, (int, float)) for value in accuracies) else None
+    max_delta = tolerance.get("max_accuracy_delta")
+    accuracy_passed = isinstance(accuracy_delta, (int, float)) and isinstance(max_delta, (int, float)) and accuracy_delta <= max_delta
+    _qualification_check(checks, "pair.identical_predictions", tolerance.get("require_identical_predictions"), identical, identical or tolerance.get("require_identical_predictions") is False, "prediction signatures must satisfy the preregistered condition")
+    _qualification_check(checks, "pair.accuracy_delta", {"maximum": max_delta}, accuracy_delta, accuracy_passed, "accuracy difference must satisfy the preregistered tolerance")
+
+    return {
+        "schema_version": 1,
+        "mode": "repository-measured-baseline-qualification",
+        "run_ids": run_ids,
+        "eligible": all(item["passed"] for item in checks),
+        "checks": checks,
+    }
+
+
 def compare_runs(first: Path, second: Path) -> dict[str, Any]:
     manifests = [json.loads((path / "manifest.json").read_text(encoding="utf-8")) for path in (first, second)]
     if any(item.get("status") != "completed" for item in manifests):
@@ -373,6 +701,10 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("first", type=Path)
     compare.add_argument("second", type=Path)
     compare.add_argument("--output", type=Path)
+    qualify = commands.add_parser("qualify", help="validate two repository-measured baseline artifacts")
+    qualify.add_argument("first", type=Path)
+    qualify.add_argument("second", type=Path)
+    qualify.add_argument("--output", type=Path)
     return parser
 
 
@@ -393,6 +725,15 @@ def main() -> int:
                     handle.write(payload)
             print(payload, end="")
             return 0 if result["reproducible"] else 1
+        if args.command == "qualify":
+            result = qualify_baseline_runs(args.first, args.second)
+            payload = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                with args.output.open("x", encoding="utf-8") as handle:
+                    handle.write(payload)
+            print(payload, end="")
+            return 0 if result["eligible"] else 1
 
         if args.command == "preflight":
             run_id = args.run_id or datetime.now(timezone.utc).strftime("preflight-%Y%m%dT%H%M%SZ-") + uuid4().hex[:8]
