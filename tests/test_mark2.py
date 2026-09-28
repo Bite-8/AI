@@ -77,6 +77,43 @@ def make_measured_artifact(path, run_id):
     run.write_json(path / "manifest.json", manifest)
 
 
+class MeasuredBackend:
+    name = "transformers"
+
+    def run(self, config, manifest, run_dir):
+        (run_dir / "chat_template.txt").write_text("fixed template", encoding="utf-8")
+        model_config = {"model_type": "qwen3_5"}
+        run.write_json(run_dir / "model_config.json", model_config)
+        rows = []
+        for index in range(config["dataset"]["sample_size"]):
+            rows.append(
+                {
+                    "question_sha256": hashlib.sha256(f"question-{index}".encode()).hexdigest(),
+                    "subject": "fixture",
+                    "target": "A",
+                    "prediction": "A",
+                    "correct": True,
+                    "output_text": "Answer: A",
+                    "generation_seconds": 0.1,
+                    "index": index,
+                    "input_tokens": 10,
+                    "output_tokens": 2,
+                }
+            )
+        question_hashes = [row["question_sha256"] for row in rows]
+        manifest.update(
+            dataset_selection={
+                "count": len(rows),
+                "question_hashes": question_hashes,
+                "sha256": hashlib.sha256("\n".join(question_hashes).encode("ascii")).hexdigest(),
+            },
+            chat_template_sha256=hashlib.sha256(b"fixed template").hexdigest(),
+            model_config_sha256=run.sha256_json(model_config),
+            runtime={"backend": "transformers"},
+        )
+        return rows
+
+
 class FakeProbe:
     def __init__(self, **overrides):
         self.values = {
@@ -183,6 +220,98 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(result["mode"], "repository-measured-baseline-qualification")
             self.assertTrue(result["checks"])
             self.assertTrue(all({"name", "expected", "actual", "passed", "reason"} == set(item) for item in result["checks"]))
+
+    def test_execute_run_artifacts_are_qualified(self):
+        config = read_config(run.DEFAULT_CONFIG)
+
+        def successful_git_command(args):
+            output = "" if "status" in args else EXPECTED_COMMIT
+            return {"status": "ok", "output": output}
+
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command):
+            root = Path(folder)
+            first = run.execute_run(
+                config,
+                run.DEFAULT_CONFIG,
+                root,
+                "first",
+                MeasuredBackend(),
+                expected_commit=EXPECTED_COMMIT,
+                preflight_probe=FakeProbe(),
+            )
+            second = run.execute_run(
+                config,
+                run.DEFAULT_CONFIG,
+                root,
+                "second",
+                MeasuredBackend(),
+                expected_commit=EXPECTED_COMMIT,
+                preflight_probe=FakeProbe(),
+            )
+            result = run.qualify_baseline_runs(first, second)
+            self.assertTrue(result["eligible"])
+            manifest = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["git_commit"], EXPECTED_COMMIT)
+            self.assertEqual(manifest["git_status"], "")
+
+    def test_command_failure_cannot_qualify_as_git_evidence(self):
+        config = read_config(run.DEFAULT_CONFIG)
+        failed = {"status": "error", "returncode": 128}
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", return_value=failed):
+            root = Path(folder)
+            first = run.execute_run(
+                config,
+                run.DEFAULT_CONFIG,
+                root,
+                "first",
+                MeasuredBackend(),
+                expected_commit=EXPECTED_COMMIT,
+                preflight_probe=FakeProbe(),
+            )
+            second = run.execute_run(
+                config,
+                run.DEFAULT_CONFIG,
+                root,
+                "second",
+                MeasuredBackend(),
+                expected_commit=EXPECTED_COMMIT,
+                preflight_probe=FakeProbe(),
+            )
+            result = run.qualify_baseline_runs(first, second)
+            self.assertFalse(result["eligible"])
+            failed_checks = {item["name"] for item in result["checks"] if not item["passed"]}
+            self.assertIn("run1.manifest_schema", failed_checks)
+            self.assertIn("run1.commit_preflight_consistency", failed_checks)
+
+    def test_qualification_rejects_self_consistent_fixed_file_tampering(self):
+        cases = ("contract", "profile")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                first, second = root / "first", root / "second"
+                make_measured_artifact(first, "first")
+                make_measured_artifact(second, "second")
+                for artifact in (first, second):
+                    if case == "contract":
+                        contract = json.loads((artifact / "contract.json").read_text(encoding="utf-8"))
+                        contract["metric"]["reproducibility"]["max_accuracy_delta"] = 1.0
+                        run.write_json(artifact / "contract.json", contract)
+                        manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                        manifest["contract"] = contract
+                        manifest["contract_sha256"] = run.sha256_json(contract)
+                        run.write_json(artifact / "manifest.json", manifest)
+                    else:
+                        preflight = json.loads((artifact / "preflight.json").read_text(encoding="utf-8"))
+                        preflight["profile"]["packages"]["torch"] = "0.0.0"
+                        preflight["observed"]["packages"]["torch"] = "0.0.0"
+                        preflight = evaluate_preflight(
+                            preflight["profile"], preflight["expected_commit"], FakeProbe(packages=preflight["observed"]["packages"])
+                        )
+                        run.write_json(artifact / "preflight.json", preflight)
+                result = run.qualify_baseline_runs(first, second)
+                self.assertFalse(result["eligible"])
+                failed_checks = {item["name"] for item in result["checks"] if not item["passed"]}
+                self.assertIn(f"run1.fixed_{case}", failed_checks)
 
     def test_qualification_rejects_representative_artifact_tampering(self):
         def change_prediction(manifest, rows):

@@ -239,6 +239,12 @@ def _snapshot(run_dir: Path, profile_path: Path = DEFAULT_PROFILE) -> dict[str, 
     return hashes
 
 
+def _command_evidence(args: list[str]) -> Any:
+    """Store successful command output as text and preserve failures for rejection."""
+    result = command(args)
+    return result.get("output") if result.get("status") == "ok" else result
+
+
 def execute_run(
     config: dict[str, Any],
     config_path: Path,
@@ -262,8 +268,10 @@ def execute_run(
         "backend": backend.name,
         "contract_sha256": sha256_json(config),
         "contract": config,
-        "git_commit": command(["git", "-C", str(REPOSITORY_ROOT), "rev-parse", "HEAD"]),
-        "git_status": command(["git", "-C", str(REPOSITORY_ROOT), "status", "--porcelain"]),
+        "git_commit": _command_evidence(["git", "-C", str(REPOSITORY_ROOT), "rev-parse", "HEAD"]),
+        "git_status": _command_evidence(
+            ["git", "-C", str(REPOSITORY_ROOT), "status", "--porcelain", "--untracked-files=no"]
+        ),
         "environment": collect(run_dir),
         "source_sha256": _snapshot(run_dir, profile_path),
         "result_classification": "unverified" if backend.name == "transformers" else "mock-only",
@@ -374,6 +382,10 @@ class _SavedProbe:
 
 def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
     """Validate whether two artifacts are admissible repository-measured baselines."""
+    fixed_contract = read_config(DEFAULT_CONFIG)
+    fixed_profile = read_profile(DEFAULT_PROFILE)
+    fixed_contract_hash = sha256_json(fixed_contract)
+    fixed_profile_hash = sha256_json(fixed_profile)
     paths = (first, second)
     checks: list[dict[str, Any]] = []
     manifests: list[dict[str, Any] | None] = []
@@ -510,6 +522,26 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         hashes_match = contract is not None and manifest.get("contract") == contract and manifest.get("contract_sha256") == sha256_json(contract)
         _qualification_check(
             checks, f"{prefix}.contract_integrity", True, hashes_match, hashes_match, "contract file, embedded contract, and declared hash must agree"
+        )
+        contract_fixed = contract == fixed_contract and manifest.get("contract_sha256") == fixed_contract_hash
+        _qualification_check(
+            checks,
+            f"{prefix}.fixed_contract",
+            fixed_contract_hash,
+            sha256_json(contract) if contract is not None else None,
+            contract_fixed,
+            "saved contract must exactly match the repository's preregistered contract",
+        )
+
+        saved_profile = preflight.get("profile") if isinstance(preflight, dict) else None
+        profile_fixed = saved_profile == fixed_profile
+        _qualification_check(
+            checks,
+            f"{prefix}.fixed_profile",
+            fixed_profile_hash,
+            sha256_json(saved_profile) if isinstance(saved_profile, dict) else None,
+            profile_fixed,
+            "saved execution profile must exactly match the repository's approved profile",
         )
 
         source_hashes = manifest.get("source_sha256")
