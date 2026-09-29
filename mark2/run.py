@@ -599,7 +599,10 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
             for row_index, row in enumerate(rows):
                 invalid = _required_fields(row, prediction_schema)
                 target, prediction, correct = row.get("target"), row.get("prediction"), row.get("correct")
-                if not isinstance(target, str) or target not in "ABCD" or (prediction is not None and (not isinstance(prediction, str) or prediction not in "ABCD")):
+                answer_choices = {"A", "B", "C", "D"}
+                if not isinstance(target, str) or target not in answer_choices or (
+                    prediction is not None and (not isinstance(prediction, str) or prediction not in answer_choices)
+                ):
                     invalid.append("answer_value")
                 if isinstance(correct, bool) and correct != (prediction == target):
                     invalid.append("correct_consistency")

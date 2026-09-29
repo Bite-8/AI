@@ -371,6 +371,31 @@ class ArtifactTests(unittest.TestCase):
                 failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
                 self.assertIn(expected_failed_check, failed_checks)
 
+    def test_qualification_cli_rejects_non_choice_answer_values(self):
+        for answer_value in ("", "AB"):
+            with self.subTest(answer_value=answer_value), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                artifacts = (root / "first", root / "second")
+                for artifact, run_id in zip(artifacts, ("first", "second")):
+                    make_measured_artifact(artifact, run_id)
+                    rows = run._predictions(artifact / "predictions.jsonl")
+                    for row in rows:
+                        row.update(target=answer_value, prediction=answer_value, correct=True)
+                    with (artifact / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                        for row in rows:
+                            handle.write(json.dumps(row) + "\n")
+
+                stdout = io.StringIO()
+                with patch.object(
+                    sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+                ), patch.object(sys, "stdout", stdout):
+                    self.assertEqual(run.main(), 1)
+                report = json.loads(stdout.getvalue())
+                self.assertFalse(report["eligible"])
+                failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+                self.assertIn("run1.prediction_schema", failed_checks)
+                self.assertIn("run2.prediction_schema", failed_checks)
+
     def test_qualification_rejects_representative_artifact_tampering(self):
         def change_prediction(manifest, rows):
             rows[0].update(prediction="B", correct=False)
