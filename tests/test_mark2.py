@@ -24,10 +24,7 @@ def make_measured_artifact(path, run_id):
     (path / "chat_template.txt").write_text("fixed template", encoding="utf-8")
     model_config = {"model_type": "qwen3_5"}
     run.write_json(path / "model_config.json", model_config)
-    source_dir = path / "source"
-    source_dir.mkdir()
-    (source_dir / "run.py").write_text("pinned source", encoding="utf-8")
-    source_hashes = {"run.py": hashlib.sha256((source_dir / "run.py").read_bytes()).hexdigest()}
+    source_hashes = run._snapshot(path)
     rows = []
     for index in range(config["dataset"]["sample_size"]):
         rows.append(
@@ -253,6 +250,41 @@ class ArtifactTests(unittest.TestCase):
             manifest = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["git_commit"], EXPECTED_COMMIT)
             self.assertEqual(manifest["git_status"], "")
+
+    def test_qualification_rejects_missing_required_snapshot_file_and_manifest_entry(self):
+        config = read_config(run.DEFAULT_CONFIG)
+
+        def successful_git_command(args):
+            output = "" if "status" in args else EXPECTED_COMMIT
+            return {"status": "ok", "output": output}
+
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command):
+            root = Path(folder)
+            artifacts = [
+                run.execute_run(
+                    config,
+                    run.DEFAULT_CONFIG,
+                    root,
+                    run_id,
+                    MeasuredBackend(),
+                    expected_commit=EXPECTED_COMMIT,
+                    preflight_probe=FakeProbe(),
+                )
+                for run_id in ("first", "second")
+            ]
+            for artifact in artifacts:
+                (artifact / "source" / "config.py").unlink()
+                manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                manifest["source_sha256"].pop("config.py")
+                run.write_json(artifact / "manifest.json", manifest)
+
+            result = run.qualify_baseline_runs(*artifacts)
+            self.assertFalse(result["eligible"])
+            failed_checks = {item["name"] for item in result["checks"] if not item["passed"]}
+            self.assertEqual(
+                {"run1.source_integrity", "run2.source_integrity"},
+                failed_checks & {"run1.source_integrity", "run2.source_integrity"},
+            )
 
     def test_command_failure_cannot_qualify_as_git_evidence(self):
         config = read_config(run.DEFAULT_CONFIG)

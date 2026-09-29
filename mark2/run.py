@@ -222,17 +222,21 @@ def make_prediction(row: dict[str, Any], output_text: str, elapsed: float) -> di
     }
 
 
-def _snapshot(run_dir: Path, profile_path: Path = DEFAULT_PROFILE) -> dict[str, str]:
-    source_dir = run_dir / "source"
-    source_dir.mkdir()
-    hashes = {}
-    for source in (
+def _snapshot_sources(profile_path: Path = DEFAULT_PROFILE) -> tuple[Path, ...]:
+    return (
         PACKAGE_DIR / "config.py",
         PACKAGE_DIR / "environment.py",
         PACKAGE_DIR / "run.py",
         PACKAGE_DIR / "requirements.txt",
         profile_path,
-    ):
+    )
+
+
+def _snapshot(run_dir: Path, profile_path: Path = DEFAULT_PROFILE) -> dict[str, str]:
+    source_dir = run_dir / "source"
+    source_dir.mkdir()
+    hashes = {}
+    for source in _snapshot_sources(profile_path):
         target = source_dir / source.name
         shutil.copyfile(source, target)
         hashes[source.name] = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -547,7 +551,28 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         )
 
         source_hashes = manifest.get("source_sha256")
+        expected_sources = {source.name for source in _snapshot_sources()}
+        declared_sources = set(source_hashes) if isinstance(source_hashes, dict) else set()
+        source_dir = path / "source"
+        try:
+            actual_sources = {entry.name for entry in source_dir.iterdir()} if source_dir.is_dir() else set()
+        except OSError:
+            actual_sources = set()
         invalid_sources = []
+        if declared_sources != expected_sources:
+            invalid_sources.append(
+                {
+                    "manifest_filenames": sorted(declared_sources),
+                    "required_filenames": sorted(expected_sources),
+                }
+            )
+        if actual_sources != expected_sources:
+            invalid_sources.append(
+                {
+                    "artifact_filenames": sorted(actual_sources),
+                    "required_filenames": sorted(expected_sources),
+                }
+            )
         if isinstance(source_hashes, dict) and source_hashes:
             for filename, expected_hash in source_hashes.items():
                 source_path = path / "source" / filename
