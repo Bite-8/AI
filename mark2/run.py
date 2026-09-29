@@ -516,6 +516,52 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
             checks, f"{prefix}.preflight_passed", True, preflight_reference, reference_valid, "manifest and saved preflight must show every host check passed"
         )
 
+        runtime = manifest.get("runtime")
+        accelerator = observed.get("accelerator") if isinstance(observed, dict) else None
+        observed_gpus = accelerator.get("gpus") if isinstance(accelerator, dict) else None
+        observed_gpu_names = (
+            [gpu.get("name") for gpu in observed_gpus]
+            if isinstance(observed_gpus, list)
+            and all(isinstance(gpu, dict) and isinstance(gpu.get("name"), str) for gpu in observed_gpus)
+            else None
+        )
+        runtime_fields = {"backend", "dtype", "quantization", "tf32", "cuda", "gpu_count", "gpu_names"}
+        runtime_valid = (
+            isinstance(runtime, dict)
+            and set(runtime) == runtime_fields
+            and runtime.get("backend") == "transformers"
+            and runtime.get("dtype") == "bfloat16"
+            and runtime.get("quantization") is None
+            and runtime.get("tf32") is False
+            and isinstance(runtime.get("cuda"), str)
+            and bool(re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", runtime["cuda"]))
+            and isinstance(runtime.get("gpu_count"), int)
+            and not isinstance(runtime.get("gpu_count"), bool)
+            and isinstance(runtime.get("gpu_names"), list)
+            and all(isinstance(name, str) for name in runtime["gpu_names"])
+            and isinstance(accelerator, dict)
+            and runtime.get("gpu_count") == accelerator.get("gpu_count")
+            and runtime.get("gpu_count") == len(runtime["gpu_names"])
+            and runtime.get("gpu_names") == observed_gpu_names
+        )
+        _qualification_check(
+            checks,
+            f"{prefix}.runtime_consistency",
+            {
+                "fields": sorted(runtime_fields),
+                "backend": "transformers",
+                "dtype": "bfloat16",
+                "quantization": None,
+                "tf32": False,
+                "cuda": "non-empty CUDA version",
+                "gpu_count": accelerator.get("gpu_count") if isinstance(accelerator, dict) else None,
+                "gpu_names": observed_gpu_names,
+            },
+            runtime,
+            runtime_valid,
+            "runtime precision and accelerator evidence must match the runner contract and saved preflight",
+        )
+
         contract_valid = contract is not None
         contract_reason = None
         if contract_valid:
@@ -680,6 +726,7 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         "dataset_selection",
         "chat_template_sha256",
         "model_config_sha256",
+        "runtime",
     )
     for field in pair_fields:
         actual = [item.get(field) if item else None for item in manifests]

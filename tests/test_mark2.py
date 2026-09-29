@@ -67,7 +67,15 @@ def make_measured_artifact(path, run_id):
         },
         "chat_template_sha256": hashlib.sha256(b"fixed template").hexdigest(),
         "model_config_sha256": run.sha256_json(model_config),
-        "runtime": {"backend": "transformers"},
+        "runtime": {
+            "backend": "transformers",
+            "dtype": "bfloat16",
+            "quantization": None,
+            "tf32": False,
+            "cuda": "12.8",
+            "gpu_count": 1,
+            "gpu_names": ["NVIDIA L4"],
+        },
         "metrics": run.aggregate(rows),
         "preflight": {"passed": True, "report": "preflight.json", "profile": str(run.DEFAULT_PROFILE)},
     }
@@ -106,7 +114,15 @@ class MeasuredBackend:
             },
             chat_template_sha256=hashlib.sha256(b"fixed template").hexdigest(),
             model_config_sha256=run.sha256_json(model_config),
-            runtime={"backend": "transformers"},
+            runtime={
+                "backend": "transformers",
+                "dtype": "bfloat16",
+                "quantization": None,
+                "tf32": False,
+                "cuda": "12.8",
+                "gpu_count": 1,
+                "gpu_names": ["NVIDIA L4"],
+            },
         )
         return rows
 
@@ -395,6 +411,35 @@ class ArtifactTests(unittest.TestCase):
                 failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
                 self.assertIn("run1.prediction_schema", failed_checks)
                 self.assertIn("run2.prediction_schema", failed_checks)
+
+    def test_qualification_cli_rejects_self_consistent_invalid_runtime(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                manifest["runtime"] = {
+                    "backend": "transformers",
+                    "dtype": "float32",
+                    "quantization": "4bit",
+                    "tf32": True,
+                    "cuda": "unexpected",
+                    "gpu_count": 8,
+                    "gpu_names": ["unexpected"] * 8,
+                }
+                run.write_json(artifact / "manifest.json", manifest)
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+            report = json.loads(stdout.getvalue())
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.runtime_consistency", failed_checks)
+            self.assertIn("run2.runtime_consistency", failed_checks)
 
     def test_qualification_rejects_representative_artifact_tampering(self):
         def change_prediction(manifest, rows):
