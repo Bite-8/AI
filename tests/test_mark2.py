@@ -441,6 +441,32 @@ class ArtifactTests(unittest.TestCase):
             self.assertIn("run1.runtime_consistency", failed_checks)
             self.assertIn("run2.runtime_consistency", failed_checks)
 
+    def test_qualification_cli_rejects_type_invalid_metrics(self):
+        cases = {
+            "boolean_accuracy": lambda metrics: metrics.update(accuracy=True),
+            "float_count": lambda metrics: metrics.update(correct=float(metrics["correct"])),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                artifacts = (root / "first", root / "second")
+                for artifact, run_id in zip(artifacts, ("first", "second")):
+                    make_measured_artifact(artifact, run_id)
+                    manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                    mutate(manifest["metrics"])
+                    run.write_json(artifact / "manifest.json", manifest)
+
+                stdout = io.StringIO()
+                with patch.object(
+                    sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+                ), patch.object(sys, "stdout", stdout):
+                    self.assertEqual(run.main(), 1)
+                report = json.loads(stdout.getvalue())
+                self.assertFalse(report["eligible"])
+                failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+                self.assertIn("run1.metric_integrity", failed_checks)
+                self.assertIn("run2.metric_integrity", failed_checks)
+
     def test_qualification_rejects_representative_artifact_tampering(self):
         def change_prediction(manifest, rows):
             rows[0].update(prediction="B", correct=False)

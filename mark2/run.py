@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import shutil
 import sys
@@ -688,9 +689,28 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         )
 
         metrics = manifest.get("metrics")
+        contract_metric = contract.get("metric") if isinstance(contract, dict) else None
+        expected_metric_name = contract_metric.get("name") if isinstance(contract_metric, dict) else None
+        metric_keys = {"metric", "accuracy", "correct", "total", "parsed", "unparseable"}
+        count_fields = ("correct", "total", "parsed", "unparseable")
+        metrics_schema_valid = (
+            isinstance(metrics, dict)
+            and set(metrics) == metric_keys
+            and metrics.get("metric") == expected_metric_name
+            and isinstance(metrics.get("accuracy"), (int, float))
+            and not isinstance(metrics.get("accuracy"), bool)
+            and math.isfinite(metrics["accuracy"])
+            and 0 <= metrics["accuracy"] <= 1
+            and all(isinstance(metrics.get(field), int) and not isinstance(metrics.get(field), bool) and metrics[field] >= 0 for field in count_fields)
+        )
         recalculated = aggregate(rows) if rows is not None and not row_errors else None
         _qualification_check(
-            checks, f"{prefix}.metric_integrity", recalculated, metrics, metrics == recalculated and recalculated is not None, "manifest metrics must equal metrics recalculated from predictions"
+            checks,
+            f"{prefix}.metric_integrity",
+            recalculated,
+            metrics,
+            metrics_schema_valid and metrics == recalculated and recalculated is not None,
+            "manifest metrics must have the exact typed schema and equal metrics recalculated from predictions",
         )
 
         chat_path, model_path = path / "chat_template.txt", path / "model_config.json"
