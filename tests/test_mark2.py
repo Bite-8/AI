@@ -472,6 +472,37 @@ class ArtifactTests(unittest.TestCase):
             self.assertIn("run1.prediction_schema", failed_checks)
             self.assertIn("run2.prediction_schema", failed_checks)
 
+    def test_qualification_cli_reports_non_finite_metric_as_strict_json(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                manifest_path = artifact / "manifest.json"
+                manifest_path.write_text(
+                    manifest_path.read_text(encoding="utf-8").replace('"accuracy": 1.0', '"accuracy": NaN'),
+                    encoding="utf-8",
+                )
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+
+            def reject_non_finite(value):
+                raise ValueError(f"non-finite JSON constant: {value}")
+
+            report = json.loads(stdout.getvalue(), parse_constant=reject_non_finite)
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.metric_integrity", failed_checks)
+            self.assertIn("run2.metric_integrity", failed_checks)
+            metric_checks = [item for item in report["checks"] if item["name"].endswith(".metric_integrity")]
+            self.assertTrue(
+                all(item["actual"]["accuracy"] == {"non_finite_number": "NaN"} for item in metric_checks)
+            )
+
     def test_qualification_cli_rejects_self_consistent_invalid_runtime(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

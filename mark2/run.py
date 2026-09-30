@@ -367,7 +367,30 @@ def _predictions(path: Path) -> list[dict[str, Any]]:
 def _qualification_check(
     checks: list[dict[str, Any]], name: str, expected: Any, actual: Any, passed: bool, reason: str
 ) -> None:
-    checks.append({"name": name, "expected": expected, "actual": actual, "passed": passed, "reason": reason})
+    checks.append(
+        {
+            "name": name,
+            "expected": _json_safe(expected),
+            "actual": _json_safe(actual),
+            "passed": passed,
+            "reason": reason,
+        }
+    )
+
+
+def _json_safe(value: Any) -> Any:
+    """Replace non-finite numbers so qualification reports remain strict JSON."""
+    if isinstance(value, float) and not math.isfinite(value):
+        if math.isnan(value):
+            label = "NaN"
+        else:
+            label = "Infinity" if value > 0 else "-Infinity"
+        return {"non_finite_number": label}
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
@@ -831,9 +854,25 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
     if not isinstance(tolerance, dict):
         tolerance = {}
     accuracies = [item.get("metrics", {}).get("accuracy") if item and isinstance(item.get("metrics"), dict) else None for item in manifests]
-    accuracy_delta = abs(accuracies[0] - accuracies[1]) if all(isinstance(value, (int, float)) for value in accuracies) else None
+    accuracy_delta = (
+        abs(accuracies[0] - accuracies[1])
+        if all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            for value in accuracies
+        )
+        else None
+    )
     max_delta = tolerance.get("max_accuracy_delta")
-    accuracy_passed = isinstance(accuracy_delta, (int, float)) and isinstance(max_delta, (int, float)) and accuracy_delta <= max_delta
+    accuracy_passed = (
+        isinstance(accuracy_delta, (int, float))
+        and math.isfinite(accuracy_delta)
+        and isinstance(max_delta, (int, float))
+        and not isinstance(max_delta, bool)
+        and math.isfinite(max_delta)
+        and accuracy_delta <= max_delta
+    )
     _qualification_check(checks, "pair.identical_predictions", tolerance.get("require_identical_predictions"), identical, identical or tolerance.get("require_identical_predictions") is False, "prediction signatures must satisfy the preregistered condition")
     _qualification_check(checks, "pair.accuracy_delta", {"maximum": max_delta}, accuracy_delta, accuracy_passed, "accuracy difference must satisfy the preregistered tolerance")
 
@@ -918,7 +957,7 @@ def main() -> int:
             return 0 if result["reproducible"] else 1
         if args.command == "qualify":
             result = qualify_baseline_runs(args.first, args.second)
-            payload = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            payload = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 with args.output.open("x", encoding="utf-8") as handle:
