@@ -698,7 +698,12 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
                 if row.get("index") != row_index:
                     invalid.append("index_sequence")
                 elapsed = row.get("generation_seconds")
-                if isinstance(elapsed, bool) or (isinstance(elapsed, (int, float)) and elapsed < 0):
+                if (
+                    isinstance(elapsed, bool)
+                    or not isinstance(elapsed, (int, float))
+                    or not math.isfinite(elapsed)
+                    or elapsed < 0
+                ):
                     invalid.append("generation_seconds")
                 if invalid:
                     row_errors.append({"row": row_index, "fields": sorted(set(invalid))})

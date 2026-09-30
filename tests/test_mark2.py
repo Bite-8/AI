@@ -449,6 +449,29 @@ class ArtifactTests(unittest.TestCase):
                 self.assertIn("run1.prediction_schema", failed_checks)
                 self.assertIn("run2.prediction_schema", failed_checks)
 
+    def test_qualification_cli_rejects_non_finite_generation_seconds(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                predictions = artifact / "predictions.jsonl"
+                predictions.write_text(
+                    predictions.read_text(encoding="utf-8").replace('"generation_seconds": 0.1', '"generation_seconds": 1e309'),
+                    encoding="utf-8",
+                )
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+            report = json.loads(stdout.getvalue())
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.prediction_schema", failed_checks)
+            self.assertIn("run2.prediction_schema", failed_checks)
+
     def test_qualification_cli_rejects_self_consistent_invalid_runtime(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
