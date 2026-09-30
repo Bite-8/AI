@@ -503,6 +503,43 @@ class ArtifactTests(unittest.TestCase):
                 all(item["actual"]["accuracy"] == {"non_finite_number": "NaN"} for item in metric_checks)
             )
 
+    def test_qualification_cli_rejects_oversized_numbers_as_strict_json(self):
+        oversized = 10 ** 1000
+        for field in ("generation_seconds", "accuracy"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                artifacts = (root / "first", root / "second")
+                for artifact, run_id in zip(artifacts, ("first", "second")):
+                    make_measured_artifact(artifact, run_id)
+                    if field == "generation_seconds":
+                        rows = run._predictions(artifact / "predictions.jsonl")
+                        for row in rows:
+                            row[field] = oversized
+                        with (artifact / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                            for row in rows:
+                                handle.write(json.dumps(row) + "\n")
+                    else:
+                        manifest_path = artifact / "manifest.json"
+                        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                        manifest["metrics"][field] = oversized
+                        run.write_json(manifest_path, manifest)
+
+                stdout = io.StringIO()
+                with patch.object(
+                    sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+                ), patch.object(sys, "stdout", stdout):
+                    self.assertEqual(run.main(), 1)
+
+                report = json.loads(
+                    stdout.getvalue(),
+                    parse_constant=lambda value: self.fail(f"non-finite JSON constant: {value}"),
+                )
+                self.assertFalse(report["eligible"])
+                failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+                check_suffix = "prediction_schema" if field == "generation_seconds" else "metric_integrity"
+                self.assertIn(f"run1.{check_suffix}", failed_checks)
+                self.assertIn(f"run2.{check_suffix}", failed_checks)
+
     def test_qualification_cli_rejects_self_consistent_invalid_runtime(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

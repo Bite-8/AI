@@ -393,6 +393,16 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _is_bounded_number(value: Any, minimum: int | float, maximum: int | float) -> bool:
+    """Check a JSON number without coercing oversized integers to float."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and (not isinstance(value, float) or math.isfinite(value))
+        and minimum <= value <= maximum
+    )
+
+
 def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -721,12 +731,7 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
                 if row.get("index") != row_index:
                     invalid.append("index_sequence")
                 elapsed = row.get("generation_seconds")
-                if (
-                    isinstance(elapsed, bool)
-                    or not isinstance(elapsed, (int, float))
-                    or not math.isfinite(elapsed)
-                    or elapsed < 0
-                ):
+                if not _is_bounded_number(elapsed, 0, sys.float_info.max):
                     invalid.append("generation_seconds")
                 if invalid:
                     row_errors.append({"row": row_index, "fields": sorted(set(invalid))})
@@ -776,10 +781,7 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
             isinstance(metrics, dict)
             and set(metrics) == metric_keys
             and metrics.get("metric") == expected_metric_name
-            and isinstance(metrics.get("accuracy"), (int, float))
-            and not isinstance(metrics.get("accuracy"), bool)
-            and math.isfinite(metrics["accuracy"])
-            and 0 <= metrics["accuracy"] <= 1
+            and _is_bounded_number(metrics.get("accuracy"), 0, 1)
             and all(isinstance(metrics.get(field), int) and not isinstance(metrics.get(field), bool) and metrics[field] >= 0 for field in count_fields)
         )
         recalculated = aggregate(rows) if rows is not None and not row_errors else None
@@ -856,21 +858,13 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
     accuracies = [item.get("metrics", {}).get("accuracy") if item and isinstance(item.get("metrics"), dict) else None for item in manifests]
     accuracy_delta = (
         abs(accuracies[0] - accuracies[1])
-        if all(
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(value)
-            for value in accuracies
-        )
+        if all(_is_bounded_number(value, 0, 1) for value in accuracies)
         else None
     )
     max_delta = tolerance.get("max_accuracy_delta")
     accuracy_passed = (
-        isinstance(accuracy_delta, (int, float))
-        and math.isfinite(accuracy_delta)
-        and isinstance(max_delta, (int, float))
-        and not isinstance(max_delta, bool)
-        and math.isfinite(max_delta)
+        _is_bounded_number(accuracy_delta, 0, 1)
+        and _is_bounded_number(max_delta, 0, 1)
         and accuracy_delta <= max_delta
     )
     _qualification_check(checks, "pair.identical_predictions", tolerance.get("require_identical_predictions"), identical, identical or tolerance.get("require_identical_predictions") is False, "prediction signatures must satisfy the preregistered condition")
