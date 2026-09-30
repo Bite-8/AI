@@ -713,8 +713,20 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         sample_size = contract_dataset.get("sample_size") if isinstance(contract_dataset, dict) else None
         hashes_are_valid = all(re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes)
         expected_selection_hash = hashlib.sha256("\n".join(hashes).encode("ascii")).hexdigest() if hashes and hashes_are_valid else None
-        selection_valid = (
+        selection_keys = {"count", "question_hashes", "sha256"}
+        selection_schema_valid = (
             isinstance(selection, dict)
+            and set(selection) == selection_keys
+            and isinstance(selection.get("count"), int)
+            and not isinstance(selection.get("count"), bool)
+            and selection["count"] >= 0
+            and isinstance(selection.get("question_hashes"), list)
+            and all(isinstance(value, str) for value in selection["question_hashes"])
+            and isinstance(selection.get("sha256"), str)
+            and bool(re.fullmatch(r"[0-9a-f]{64}", selection["sha256"]))
+        )
+        selection_valid = (
+            selection_schema_valid
             and rows is not None
             and len(rows) == sample_size
             and selection.get("count") == len(rows)
