@@ -36,11 +36,23 @@ AI workflowの状態は次のGitHub labelだけで機械判定する。コメン
 
 1つのIssueまたはPRに複数のAI状態labelがある場合は推測で修正せず、`BLOCKED`として終了する。
 
+`priority:urgent`はAI状態labelではなく、Humanが通常queueへの割り込みを指示する優先度labelとする。Agentは自らこのlabelを新規付与してはならない。urgentなIssueからPRを作る場合に限り、その優先度をPRへ引き継ぐ。urgentであってもIssue Review、CI、PR Review、安全停止条件は省略しない。
+
+### Issueの粒度
+
+Work AgentがIssueを提案する際は、まず`GOAL.md`とRepositoryの差分から最も価値の高い課題を選び、その後で課題を依存順の、独立して実装・検証・merge可能な単位へ分解する。単純な最小化は目的にせず、意味のある改善を残しながら1回のPR Reviewで全体を直接検証できる最初の単位だけをIssue化する。
+
+- 主目的と主要な設計判断をそれぞれ1つに絞る。
+- 独立した成果、failure domain、security boundary、または基盤とその利用機能を一つのIssueへ混在させない。
+- 分割した一部だけを独立して承認・差し戻しできる場合はIssueを狭める。
+- 単独では検証不能、またはmergeしても意味のある改善を残さないほど細かく分割しない。
+- 後続候補は現在のScopeや完了条件へ含めず、先行Issueの完了後に最新のRepositoryと`GOAL.md`から再評価する。Sub-issueの作成は必須としない。
+
 ### Routing順序
 
 毎回`GOAL.md`、Repository、remote、open中のAI対象、PRのhead・CI・review・mergeabilityを確認する。既存の一般Issue/PRはrouting対象にしないが、Work AgentがIssueを作る際は重複調査の対象にする。
 
-実行可能な対象が複数ある場合は、次の優先順位で最も古い1件を選ぶ。
+最初に、`priority:urgent`と有効なAI状態labelの両方を持つopen対象だけを候補として、次の優先順位で最も古い1件を選ぶ。urgent候補に実行可能な対象がなければ、`priority:urgent`の有無にかかわらず同じ優先順位を通常queueへ適用する。
 
 1. `ai:human-review`のPRが現在merge可能なら、Main Agentがmerge commit方式でmergeし、remote branchを削除する
 2. PRの`ai:changes-requested` → `work`
@@ -52,6 +64,8 @@ AI workflowの状態は次のGitHub labelだけで機械判定する。コメン
 8. 実行可能な対象がない → `work`にIssueを1件提案させる
 
 CIがpendingのPRと、まだ承認されていない`ai:human-review`のPRはその回の実行対象から外し、他の実行可能な対象を探す。
+
+`priority:urgent`だけを持ちAI状態labelがない対象はroutingしない。タイトルの`[Hot]`等の文字列やauthor種別は優先度判定に使わない。
 
 ### Subagentへの委任
 

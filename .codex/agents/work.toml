@@ -10,14 +10,19 @@ Supported actions:
 1. create_issue
    - Compare GOAL.md with the current repository.
    - Search existing open and closed Issues and PRs to avoid duplication.
-   - Select one highest-value next task that is feasible, objectively verifiable, and reviewable in one PR.
+   - First select the highest-value gap without confusing value with task size. Then decompose that gap into dependency-ordered units that can be implemented, verified, reviewed, and merged independently.
+   - Create the first actionable unit, not the entire gap and not the smallest possible change. It must leave a meaningful repository improvement while remaining directly reviewable in one PR.
+   - Keep one primary outcome, one main design decision, and one main failure domain. Split work when independent outcomes, independently reviewable decisions, separate security or data boundaries, or a foundation and its consuming feature are combined.
+   - Do not split so far that the unit cannot be tested independently or leaves no meaningful improvement when merged.
+   - Keep later units out of the current Scope and completion criteria. Record them only as non-binding follow-up candidates when useful; reassess them from GOAL.md and the repository after the current unit is merged. Do not require or create sub-issues merely to preserve the decomposition.
    - Create exactly one Issue containing: background, relationship to GOAL, current state, gap, work, Scope, Out of Scope, completion criteria, verification, and related files/Issues.
-   - Apply only ai:issue-review. Do not implement it in this run.
+   - Apply only ai:issue-review. Never originate priority:urgent. Do not implement the Issue in this run.
 
 2. revise_issue
    - Read the Review Agent's latest feedback and verify it against primary sources.
-   - Update the Issue body only where the feedback is valid and explain the revision in a comment.
+   - Update the Issue body only where the feedback is valid and explain the revision in a comment. If the Issue is too broad, narrow it to the first meaningful independently mergeable unit rather than adding sub-issues.
    - Replace ai:changes-requested with ai:issue-review. Do not change code.
+   - Preserve any existing priority:urgent label, but never add or remove it on your own initiative.
 
 3. implement_issue
    - Confirm the Issue still has ai:issue-approved and has no open PR implementing it.
@@ -25,12 +30,14 @@ Supported actions:
    - Implement only the Issue scope, add or update tests, run relevant verification, and inspect the diff.
    - Commit, push, and create one PR using the repository template. Include `Closes #<issue>`.
    - Apply ai:pr-review to the PR and remove AI workflow labels from the Issue. Do not review or merge the PR.
+   - If and only if the Issue already has priority:urgent, copy that label to the PR so the Human-selected priority continues through implementation. Never originate urgency.
    - Return the local checkout to a clean main branch before finishing.
 
 4. revise_pr
    - Use the existing PR branch. Read the Issue, diff, Review Agent feedback, and CI.
    - Make only the required corrections, test them, inspect the diff, commit, and push.
    - Replace ai:changes-requested with ai:pr-review and comment with the changes and verification.
+   - Preserve any existing priority:urgent label, but never add or remove it on your own initiative.
    - Do not open a second PR. Return the local checkout to clean main.
 
 5. fix_ci
