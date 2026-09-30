@@ -8,6 +8,7 @@ import json
 import math
 import re
 import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -242,6 +243,29 @@ def _snapshot(run_dir: Path, profile_path: Path = DEFAULT_PROFILE) -> dict[str, 
         shutil.copyfile(source, target)
         hashes[source.name] = hashlib.sha256(source.read_bytes()).hexdigest()
     return hashes
+
+
+def _committed_source_hashes(commit: str) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Read snapshot sources from the recorded repository commit."""
+    hashes: dict[str, str] = {}
+    errors: list[dict[str, Any]] = []
+    for source in _snapshot_sources():
+        try:
+            repository_path = source.relative_to(REPOSITORY_ROOT).as_posix()
+            result = subprocess.run(
+                ["git", "-C", str(REPOSITORY_ROOT), "show", f"{commit}:{repository_path}"],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            errors.append({"filename": source.name, "error": type(exc).__name__})
+            continue
+        if result.returncode:
+            errors.append({"filename": source.name, "error": "not present at recorded commit"})
+            continue
+        hashes[source.name] = hashlib.sha256(result.stdout).hexdigest()
+    return hashes, errors
 
 
 def _command_evidence(args: list[str]) -> Any:
@@ -599,6 +623,7 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
 
         source_hashes = manifest.get("source_sha256")
         expected_sources = {source.name for source in _snapshot_sources()}
+        committed_hashes, committed_source_errors = _committed_source_hashes(manifest.get("git_commit", ""))
         declared_sources = set(source_hashes) if isinstance(source_hashes, dict) else set()
         source_dir = path / "source"
         try:
@@ -636,8 +661,22 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
                     invalid_sources.append(filename)
         else:
             invalid_sources.append("source_sha256")
+        if committed_source_errors:
+            invalid_sources.extend(committed_source_errors)
+        if committed_hashes != source_hashes:
+            invalid_sources.append(
+                {
+                    "recorded_commit_hashes": committed_hashes,
+                    "manifest_hashes": source_hashes,
+                }
+            )
         _qualification_check(
-            checks, f"{prefix}.source_integrity", [], invalid_sources, not invalid_sources, "source snapshot files must match the manifest hashes"
+            checks,
+            f"{prefix}.source_integrity",
+            [],
+            invalid_sources,
+            not invalid_sources,
+            "source snapshot files must match the manifest and the repository files at the recorded commit",
         )
 
         row_errors = []

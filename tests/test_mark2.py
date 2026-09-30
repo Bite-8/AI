@@ -14,7 +14,9 @@ from mark2.config import read_config, validate_config
 from mark2.environment import evaluate_preflight, read_profile
 
 
-EXPECTED_COMMIT = "a" * 40
+EXPECTED_COMMIT = run.command(
+    ["git", "-C", str(run.REPOSITORY_ROOT), "rev-parse", "HEAD"]
+)["output"]
 
 
 def make_measured_artifact(path, run_id):
@@ -301,6 +303,41 @@ class ArtifactTests(unittest.TestCase):
                 {"run1.source_integrity", "run2.source_integrity"},
                 failed_checks & {"run1.source_integrity", "run2.source_integrity"},
             )
+
+    def test_qualification_rejects_source_tampering_with_updated_manifest_hash(self):
+        config = read_config(run.DEFAULT_CONFIG)
+
+        def successful_git_command(args):
+            output = "" if "status" in args else EXPECTED_COMMIT
+            return {"status": "ok", "output": output}
+
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command):
+            root = Path(folder)
+            artifacts = [
+                run.execute_run(
+                    config,
+                    run.DEFAULT_CONFIG,
+                    root,
+                    run_id,
+                    MeasuredBackend(),
+                    expected_commit=EXPECTED_COMMIT,
+                    preflight_probe=FakeProbe(),
+                )
+                for run_id in ("first", "second")
+            ]
+            replacement = b"self-consistent but not committed source\n"
+            replacement_hash = hashlib.sha256(replacement).hexdigest()
+            for artifact in artifacts:
+                (artifact / "source" / "run.py").write_bytes(replacement)
+                manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                manifest["source_sha256"]["run.py"] = replacement_hash
+                run.write_json(artifact / "manifest.json", manifest)
+
+            result = run.qualify_baseline_runs(*artifacts)
+            self.assertFalse(result["eligible"])
+            failed_checks = {item["name"] for item in result["checks"] if not item["passed"]}
+            self.assertIn("run1.source_integrity", failed_checks)
+            self.assertIn("run2.source_integrity", failed_checks)
 
     def test_command_failure_cannot_qualify_as_git_evidence(self):
         config = read_config(run.DEFAULT_CONFIG)
