@@ -406,7 +406,7 @@ def _is_bounded_number(value: Any, minimum: int | float, maximum: int | float) -
 def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         return None, f"{type(exc).__name__}: {exc}"
     if not isinstance(value, dict):
         return None, "top-level value must be an object"
@@ -416,7 +416,7 @@ def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
 def _read_prediction_rows(path: Path) -> tuple[list[dict[str, Any]] | None, str | None]:
     try:
         values = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         return None, f"{type(exc).__name__}: {exc}"
     if not all(isinstance(value, dict) for value in values):
         return None, "every JSONL value must be an object"

@@ -540,6 +540,36 @@ class ArtifactTests(unittest.TestCase):
                 self.assertIn(f"run1.{check_suffix}", failed_checks)
                 self.assertIn(f"run2.{check_suffix}", failed_checks)
 
+    def test_qualification_cli_reports_json_integer_conversion_failure(self):
+        oversized = "9" * 5001
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                predictions = artifact / "predictions.jsonl"
+                predictions.write_text(
+                    predictions.read_text(encoding="utf-8").replace(
+                        '"generation_seconds": 0.1', f'"generation_seconds": {oversized}'
+                    ),
+                    encoding="utf-8",
+                )
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+
+            report = json.loads(
+                stdout.getvalue(),
+                parse_constant=lambda value: self.fail(f"non-finite JSON constant: {value}"),
+            )
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.predictions_readable", failed_checks)
+            self.assertIn("run2.predictions_readable", failed_checks)
+
     def test_qualification_cli_rejects_self_consistent_invalid_runtime(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
