@@ -1,9 +1,9 @@
 [Unit]
-Description=Run AI-driven development three hours after the previous run
+Description=Run AI-driven development at 00:00 and 12:00 UTC
 
 [Timer]
-OnActiveSec=10min
-OnUnitInactiveSec=3h
+OnCalendar=*-*-* 00,12:00:00 UTC
+Persistent=false
 Unit=ai-development.service
 
 [Install]
