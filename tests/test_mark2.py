@@ -339,6 +339,35 @@ class ArtifactTests(unittest.TestCase):
             self.assertIn("run1.source_integrity", failed_checks)
             self.assertIn("run2.source_integrity", failed_checks)
 
+    def test_qualification_cli_reports_source_directory_symlink_as_strict_json(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                source = artifact / "source"
+                external_source = root / f"{run_id}-external-source"
+                source.rename(external_source)
+                source.symlink_to(external_source, target_is_directory=True)
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+
+            report = json.loads(
+                stdout.getvalue(), parse_constant=lambda value: self.fail(f"non-finite JSON constant: {value}")
+            )
+            self.assertFalse(report["eligible"])
+            for check_name in ("run1.source_integrity", "run2.source_integrity"):
+                check = next(item for item in report["checks"] if item["name"] == check_name)
+                self.assertFalse(check["passed"])
+                self.assertIn(
+                    {"source_directory_error": "artifact entry must be a regular directory"},
+                    check["actual"],
+                )
+
     def test_command_failure_cannot_qualify_as_git_evidence(self):
         config = read_config(run.DEFAULT_CONFIG)
         failed = {"status": "error", "returncode": 128}

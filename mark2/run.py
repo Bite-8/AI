@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
 import stat
@@ -427,6 +428,53 @@ def _read_regular_bytes(path: Path) -> tuple[bytes | None, str | None]:
         return None, f"{type(exc).__name__}: {exc}"
 
 
+def _read_regular_directory(
+    path: Path, filenames: Iterable[str]
+) -> tuple[set[str] | None, dict[str, bytes], list[dict[str, str]]]:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        return None, {}, [{"source_directory_error": f"{type(exc).__name__}: {exc}"}]
+    if not stat.S_ISDIR(metadata.st_mode):
+        return None, {}, [{"source_directory_error": "artifact entry must be a regular directory"}]
+
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        directory_fd = os.open(path, directory_flags)
+    except OSError as exc:
+        return None, {}, [{"source_directory_error": f"{type(exc).__name__}: {exc}"}]
+
+    contents: dict[str, bytes] = {}
+    errors: list[dict[str, str]] = []
+    try:
+        try:
+            entries = set(os.listdir(directory_fd))
+        except OSError as exc:
+            return None, {}, [{"source_directory_error": f"{type(exc).__name__}: {exc}"}]
+        for filename in filenames:
+            file_descriptor = None
+            try:
+                file_descriptor = os.open(
+                    filename,
+                    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=directory_fd,
+                )
+                if not stat.S_ISREG(os.fstat(file_descriptor).st_mode):
+                    errors.append({"filename": filename, "error": "artifact entry must be a regular file"})
+                    continue
+                with os.fdopen(file_descriptor, "rb", closefd=True) as handle:
+                    file_descriptor = None
+                    contents[filename] = handle.read()
+            except OSError as exc:
+                errors.append({"filename": filename, "error": f"{type(exc).__name__}: {exc}"})
+            finally:
+                if file_descriptor is not None:
+                    os.close(file_descriptor)
+        return entries, contents, errors
+    finally:
+        os.close(directory_fd)
+
+
 def _read_regular_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     content, error = _read_regular_bytes(path)
     if error is not None:
@@ -686,11 +734,18 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         committed_hashes, committed_source_errors = _committed_source_hashes(manifest.get("git_commit", ""))
         declared_sources = set(source_hashes) if isinstance(source_hashes, dict) else set()
         source_dir = path / "source"
-        try:
-            actual_sources = {entry.name for entry in source_dir.iterdir()} if source_dir.is_dir() else set()
-        except OSError:
-            actual_sources = set()
-        invalid_sources = []
+        readable_source_names = [
+            filename
+            for filename, expected_hash in source_hashes.items()
+            if isinstance(source_hashes, dict)
+            and isinstance(filename, str)
+            and Path(filename).name == filename
+            and isinstance(expected_hash, str)
+            and bool(re.fullmatch(r"[0-9a-f]{64}", expected_hash))
+        ] if isinstance(source_hashes, dict) else []
+        actual_sources, source_contents, invalid_sources = _read_regular_directory(
+            source_dir, readable_source_names
+        )
         if declared_sources != expected_sources:
             invalid_sources.append(
                 {
@@ -698,7 +753,7 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
                     "required_filenames": sorted(expected_sources),
                 }
             )
-        if actual_sources != expected_sources:
+        if actual_sources is not None and actual_sources != expected_sources:
             invalid_sources.append(
                 {
                     "artifact_filenames": sorted(actual_sources),
@@ -707,17 +762,17 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
             )
         if isinstance(source_hashes, dict) and source_hashes:
             for filename, expected_hash in source_hashes.items():
-                source_path = path / "source" / filename
                 if (
                     not isinstance(filename, str)
                     or Path(filename).name != filename
                     or not isinstance(expected_hash, str)
                     or not re.fullmatch(r"[0-9a-f]{64}", expected_hash)
-                    or not source_path.is_file()
-                    or source_path.is_symlink()
                 ):
                     invalid_sources.append(filename)
-                elif hashlib.sha256(source_path.read_bytes()).hexdigest() != expected_hash:
+                    continue
+                if filename not in source_contents:
+                    continue
+                if hashlib.sha256(source_contents[filename]).hexdigest() != expected_hash:
                     invalid_sources.append(filename)
         else:
             invalid_sources.append("source_sha256")
