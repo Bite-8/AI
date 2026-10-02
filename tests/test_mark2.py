@@ -449,6 +449,30 @@ class ArtifactTests(unittest.TestCase):
                 self.assertIn("run1.prediction_schema", failed_checks)
                 self.assertIn("run2.prediction_schema", failed_checks)
 
+    def test_qualification_cli_rejects_output_text_prediction_mismatch(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                rows = run._predictions(artifact / "predictions.jsonl")
+                for row in rows:
+                    row["output_text"] = "Answer: B"
+                with (artifact / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                    for row in rows:
+                        handle.write(json.dumps(row) + "\n")
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+            report = json.loads(stdout.getvalue())
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.prediction_schema", failed_checks)
+            self.assertIn("run2.prediction_schema", failed_checks)
+
     def test_qualification_cli_rejects_non_finite_generation_seconds(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

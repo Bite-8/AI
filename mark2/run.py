@@ -725,6 +725,9 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
                     invalid.append("answer_value")
                 if isinstance(correct, bool) and correct != (prediction == target):
                     invalid.append("correct_consistency")
+                output_text = row.get("output_text")
+                if isinstance(output_text, str) and parse_answer(output_text) != prediction:
+                    invalid.append("output_text_consistency")
                 for integer_field in ("index", "input_tokens", "output_tokens"):
                     if isinstance(row.get(integer_field), int) and row[integer_field] < 0:
                         invalid.append(integer_field)
