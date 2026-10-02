@@ -8,6 +8,7 @@ import json
 import math
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -413,6 +414,32 @@ def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return value, None
 
 
+def _read_regular_bytes(path: Path) -> tuple[bytes | None, str | None]:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    if not stat.S_ISREG(metadata.st_mode):
+        return None, "artifact entry must be a regular file"
+    try:
+        return path.read_bytes(), None
+    except OSError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def _read_regular_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    content, error = _read_regular_bytes(path)
+    if error is not None:
+        return None, error
+    try:
+        value = json.loads(content)
+    except (OSError, ValueError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    if not isinstance(value, dict):
+        return None, "top-level value must be an object"
+    return value, None
+
+
 def _read_prediction_rows(path: Path) -> tuple[list[dict[str, Any]] | None, str | None]:
     try:
         values = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -798,12 +825,28 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         )
 
         chat_path, model_path = path / "chat_template.txt", path / "model_config.json"
-        chat_hash = hashlib.sha256(chat_path.read_bytes()).hexdigest() if chat_path.is_file() else None
-        model_config, _ = _read_json_object(model_path)
+        chat_template, chat_error = _read_regular_bytes(chat_path)
+        chat_hash = hashlib.sha256(chat_template).hexdigest() if chat_template is not None else None
+        model_config, model_error = _read_regular_json_object(model_path)
         model_hash = sha256_json(model_config) if model_config is not None else None
-        content_hashes_valid = chat_hash == manifest.get("chat_template_sha256") and model_hash == manifest.get("model_config_sha256")
+        content_hashes_valid = (
+            chat_error is None
+            and model_error is None
+            and chat_hash == manifest.get("chat_template_sha256")
+            and model_hash == manifest.get("model_config_sha256")
+        )
         _qualification_check(
-            checks, f"{prefix}.model_artifact_integrity", True, {"chat_template_sha256": chat_hash, "model_config_sha256": model_hash}, content_hashes_valid, "chat template and model config files must match their manifest hashes"
+            checks,
+            f"{prefix}.model_artifact_integrity",
+            True,
+            {
+                "chat_template_sha256": chat_hash,
+                "chat_template_error": chat_error,
+                "model_config_sha256": model_hash,
+                "model_config_error": model_error,
+            },
+            content_hashes_valid,
+            "chat template and model config must be readable regular files matching their manifest hashes",
         )
         preflight_commit = preflight.get("expected_commit") if isinstance(preflight, dict) else None
         observed = preflight.get("observed") if isinstance(preflight, dict) else None

@@ -473,6 +473,31 @@ class ArtifactTests(unittest.TestCase):
             self.assertIn("run1.prediction_schema", failed_checks)
             self.assertIn("run2.prediction_schema", failed_checks)
 
+    def test_qualification_cli_reports_model_artifact_symlink_as_strict_json(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+            chat_template = artifacts[0] / "chat_template.txt"
+            chat_template.unlink()
+            chat_template.symlink_to("/proc/self/mem")
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+
+            report = json.loads(
+                stdout.getvalue(), parse_constant=lambda value: self.fail(f"non-finite JSON constant: {value}")
+            )
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.model_artifact_integrity", failed_checks)
+            check = next(item for item in report["checks"] if item["name"] == "run1.model_artifact_integrity")
+            self.assertEqual(check["actual"]["chat_template_error"], "artifact entry must be a regular file")
+
     def test_qualification_cli_rejects_non_finite_generation_seconds(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
