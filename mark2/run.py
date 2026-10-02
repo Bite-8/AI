@@ -406,9 +406,12 @@ def _is_bounded_number(value: Any, minimum: int | float, maximum: int | float) -
 
 
 def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    content, error = _read_regular_bytes(path)
+    if error is not None:
+        return None, error
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        value = json.loads(content)
+    except ValueError as exc:
         return None, f"{type(exc).__name__}: {exc}"
     if not isinstance(value, dict):
         return None, "top-level value must be an object"
@@ -417,15 +420,42 @@ def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 def _read_regular_bytes(path: Path) -> tuple[bytes | None, str | None]:
     try:
-        metadata = path.lstat()
+        parent_metadata = path.parent.lstat()
     except OSError as exc:
         return None, f"{type(exc).__name__}: {exc}"
-    if not stat.S_ISREG(metadata.st_mode):
-        return None, "artifact entry must be a regular file"
+    if not stat.S_ISDIR(parent_metadata.st_mode):
+        return None, "artifact directory must be a regular directory"
+
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        return path.read_bytes(), None
+        directory_fd = os.open(path.parent, directory_flags)
     except OSError as exc:
         return None, f"{type(exc).__name__}: {exc}"
+
+    file_descriptor = None
+    try:
+        try:
+            entry_metadata = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+        except OSError as exc:
+            return None, f"{type(exc).__name__}: {exc}"
+        if not stat.S_ISREG(entry_metadata.st_mode):
+            return None, "artifact entry must be a regular file"
+        file_descriptor = os.open(
+            path.name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_fd,
+        )
+        if not stat.S_ISREG(os.fstat(file_descriptor).st_mode):
+            return None, "artifact entry must be a regular file"
+        with os.fdopen(file_descriptor, "rb", closefd=True) as handle:
+            file_descriptor = None
+            return handle.read(), None
+    except OSError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    finally:
+        if file_descriptor is not None:
+            os.close(file_descriptor)
+        os.close(directory_fd)
 
 
 def _read_regular_directory(
@@ -489,9 +519,12 @@ def _read_regular_json_object(path: Path) -> tuple[dict[str, Any] | None, str | 
 
 
 def _read_prediction_rows(path: Path) -> tuple[list[dict[str, Any]] | None, str | None]:
+    content, error = _read_regular_bytes(path)
+    if error is not None:
+        return None, error
     try:
-        values = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    except (OSError, ValueError) as exc:
+        values = [json.loads(line) for line in content.splitlines() if line.strip()]
+    except ValueError as exc:
         return None, f"{type(exc).__name__}: {exc}"
     if not all(isinstance(value, dict) for value in values):
         return None, "every JSONL value must be an object"

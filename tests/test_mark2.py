@@ -368,6 +368,32 @@ class ArtifactTests(unittest.TestCase):
                     check["actual"],
                 )
 
+    def test_qualification_cli_reports_prediction_symlink_as_strict_json(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                predictions = artifact / "predictions.jsonl"
+                external_predictions = root / f"{run_id}-external-predictions.jsonl"
+                predictions.rename(external_predictions)
+                predictions.symlink_to(external_predictions)
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+
+            report = json.loads(
+                stdout.getvalue(), parse_constant=lambda value: self.fail(f"non-finite JSON constant: {value}")
+            )
+            self.assertFalse(report["eligible"])
+            for check_name in ("run1.predictions_readable", "run2.predictions_readable"):
+                check = next(item for item in report["checks"] if item["name"] == check_name)
+                self.assertFalse(check["passed"])
+                self.assertEqual(check["actual"], "artifact entry must be a regular file")
+
     def test_command_failure_cannot_qualify_as_git_evidence(self):
         config = read_config(run.DEFAULT_CONFIG)
         failed = {"status": "error", "returncode": 128}
