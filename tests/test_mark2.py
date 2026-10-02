@@ -1,4 +1,8 @@
 import json
+import hashlib
+import io
+import shutil
+import sys
 import tempfile
 import unittest
 from copy import deepcopy
@@ -10,7 +14,119 @@ from mark2.config import read_config, validate_config
 from mark2.environment import evaluate_preflight, read_profile
 
 
-EXPECTED_COMMIT = "a" * 40
+EXPECTED_COMMIT = run.command(
+    ["git", "-C", str(run.REPOSITORY_ROOT), "rev-parse", "HEAD"]
+)["output"]
+
+
+def make_measured_artifact(path, run_id):
+    path.mkdir()
+    config = read_config(run.DEFAULT_CONFIG)
+    shutil.copyfile(run.DEFAULT_CONFIG, path / "contract.json")
+    (path / "chat_template.txt").write_text("fixed template", encoding="utf-8")
+    model_config = {"model_type": "qwen3_5"}
+    run.write_json(path / "model_config.json", model_config)
+    source_hashes = run._snapshot(path)
+    rows = []
+    for index in range(config["dataset"]["sample_size"]):
+        rows.append(
+            {
+                "question_sha256": hashlib.sha256(f"question-{index}".encode()).hexdigest(),
+                "subject": "fixture",
+                "target": "A",
+                "prediction": "A",
+                "correct": True,
+                "output_text": "Answer: A",
+                "generation_seconds": 0.1,
+                "index": index,
+                "input_tokens": 10,
+                "output_tokens": 2,
+            }
+        )
+    with (path / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+    question_hashes = [row["question_sha256"] for row in rows]
+    profile = read_profile(run.DEFAULT_PROFILE)
+    preflight = evaluate_preflight(profile, EXPECTED_COMMIT, FakeProbe())
+    run.write_json(path / "preflight.json", preflight)
+    manifest = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "status": "completed",
+        "backend": "transformers",
+        "result_classification": "repository-measured",
+        "contract_sha256": run.sha256_json(config),
+        "contract": config,
+        "git_commit": EXPECTED_COMMIT,
+        "git_status": "",
+        "environment": {},
+        "source_sha256": source_hashes,
+        "dataset_selection": {
+            "count": len(rows),
+            "question_hashes": question_hashes,
+            "sha256": hashlib.sha256("\n".join(question_hashes).encode("ascii")).hexdigest(),
+        },
+        "chat_template_sha256": hashlib.sha256(b"fixed template").hexdigest(),
+        "model_config_sha256": run.sha256_json(model_config),
+        "runtime": {
+            "backend": "transformers",
+            "dtype": "bfloat16",
+            "quantization": None,
+            "tf32": False,
+            "cuda": "12.8",
+            "gpu_count": 1,
+            "gpu_names": ["NVIDIA L4"],
+        },
+        "metrics": run.aggregate(rows),
+        "preflight": {"passed": True, "report": "preflight.json", "profile": str(run.DEFAULT_PROFILE)},
+    }
+    run.write_json(path / "manifest.json", manifest)
+
+
+class MeasuredBackend:
+    name = "transformers"
+
+    def run(self, config, manifest, run_dir):
+        (run_dir / "chat_template.txt").write_text("fixed template", encoding="utf-8")
+        model_config = {"model_type": "qwen3_5"}
+        run.write_json(run_dir / "model_config.json", model_config)
+        rows = []
+        for index in range(config["dataset"]["sample_size"]):
+            rows.append(
+                {
+                    "question_sha256": hashlib.sha256(f"question-{index}".encode()).hexdigest(),
+                    "subject": "fixture",
+                    "target": "A",
+                    "prediction": "A",
+                    "correct": True,
+                    "output_text": "Answer: A",
+                    "generation_seconds": 0.1,
+                    "index": index,
+                    "input_tokens": 10,
+                    "output_tokens": 2,
+                }
+            )
+        question_hashes = [row["question_sha256"] for row in rows]
+        manifest.update(
+            dataset_selection={
+                "count": len(rows),
+                "question_hashes": question_hashes,
+                "sha256": hashlib.sha256("\n".join(question_hashes).encode("ascii")).hexdigest(),
+            },
+            chat_template_sha256=hashlib.sha256(b"fixed template").hexdigest(),
+            model_config_sha256=run.sha256_json(model_config),
+            runtime={
+                "backend": "transformers",
+                "dtype": "bfloat16",
+                "quantization": None,
+                "tf32": False,
+                "cuda": "12.8",
+                "gpu_count": 1,
+                "gpu_names": ["NVIDIA L4"],
+            },
+        )
+        return rows
 
 
 class FakeProbe:
@@ -107,6 +223,596 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(manifest["status"], "failed")
             self.assertEqual(manifest["error"]["type"], "RuntimeError")
             self.assertTrue(manifest["partial_marker"])
+
+    def test_repository_measured_runs_are_qualified_with_complete_report(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first, second = root / "first", root / "second"
+            make_measured_artifact(first, "first")
+            make_measured_artifact(second, "second")
+            result = run.qualify_baseline_runs(first, second)
+            self.assertTrue(result["eligible"])
+            self.assertEqual(result["mode"], "repository-measured-baseline-qualification")
+            self.assertTrue(result["checks"])
+            self.assertTrue(all({"name", "expected", "actual", "passed", "reason"} == set(item) for item in result["checks"]))
+
+    def test_execute_run_artifacts_are_qualified(self):
+        config = read_config(run.DEFAULT_CONFIG)
+
+        def successful_git_command(args):
+            output = "" if "status" in args else EXPECTED_COMMIT
+            return {"status": "ok", "output": output}
+
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command):
+            root = Path(folder)
+            first = run.execute_run(
+                config,
+                run.DEFAULT_CONFIG,
+                root,
+                "first",
+                MeasuredBackend(),
+                expected_commit=EXPECTED_COMMIT,
+                preflight_probe=FakeProbe(),
+            )
+            second = run.execute_run(
+                config,
+                run.DEFAULT_CONFIG,
+                root,
+                "second",
+                MeasuredBackend(),
+                expected_commit=EXPECTED_COMMIT,
+                preflight_probe=FakeProbe(),
+            )
+            result = run.qualify_baseline_runs(first, second)
+            self.assertTrue(result["eligible"])
+            manifest = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["git_commit"], EXPECTED_COMMIT)
+            self.assertEqual(manifest["git_status"], "")
+
+    def test_qualification_rejects_missing_required_snapshot_file_and_manifest_entry(self):
+        config = read_config(run.DEFAULT_CONFIG)
+
+        def successful_git_command(args):
+            output = "" if "status" in args else EXPECTED_COMMIT
+            return {"status": "ok", "output": output}
+
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command):
+            root = Path(folder)
+            artifacts = [
+                run.execute_run(
+                    config,
+                    run.DEFAULT_CONFIG,
+                    root,
+                    run_id,
+                    MeasuredBackend(),
+                    expected_commit=EXPECTED_COMMIT,
+                    preflight_probe=FakeProbe(),
+                )
+                for run_id in ("first", "second")
+            ]
+            for artifact in artifacts:
+                (artifact / "source" / "config.py").unlink()
+                manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                manifest["source_sha256"].pop("config.py")
+                run.write_json(artifact / "manifest.json", manifest)
+
+            result = run.qualify_baseline_runs(*artifacts)
+            self.assertFalse(result["eligible"])
+            failed_checks = {item["name"] for item in result["checks"] if not item["passed"]}
+            self.assertEqual(
+                {"run1.source_integrity", "run2.source_integrity"},
+                failed_checks & {"run1.source_integrity", "run2.source_integrity"},
+            )
+
+    def test_qualification_rejects_source_tampering_with_updated_manifest_hash(self):
+        config = read_config(run.DEFAULT_CONFIG)
+
+        def successful_git_command(args):
+            output = "" if "status" in args else EXPECTED_COMMIT
+            return {"status": "ok", "output": output}
+
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command):
+            root = Path(folder)
+            artifacts = [
+                run.execute_run(
+                    config,
+                    run.DEFAULT_CONFIG,
+                    root,
+                    run_id,
+                    MeasuredBackend(),
+                    expected_commit=EXPECTED_COMMIT,
+                    preflight_probe=FakeProbe(),
+                )
+                for run_id in ("first", "second")
+            ]
+            replacement = b"self-consistent but not committed source\n"
+            replacement_hash = hashlib.sha256(replacement).hexdigest()
+            for artifact in artifacts:
+                (artifact / "source" / "run.py").write_bytes(replacement)
+                manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                manifest["source_sha256"]["run.py"] = replacement_hash
+                run.write_json(artifact / "manifest.json", manifest)
+
+            result = run.qualify_baseline_runs(*artifacts)
+            self.assertFalse(result["eligible"])
+            failed_checks = {item["name"] for item in result["checks"] if not item["passed"]}
+            self.assertIn("run1.source_integrity", failed_checks)
+            self.assertIn("run2.source_integrity", failed_checks)
+
+    def test_qualification_cli_reports_source_directory_symlink_as_strict_json(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                source = artifact / "source"
+                external_source = root / f"{run_id}-external-source"
+                source.rename(external_source)
+                source.symlink_to(external_source, target_is_directory=True)
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+
+            report = json.loads(
+                stdout.getvalue(), parse_constant=lambda value: self.fail(f"non-finite JSON constant: {value}")
+            )
+            self.assertFalse(report["eligible"])
+            for check_name in ("run1.source_integrity", "run2.source_integrity"):
+                check = next(item for item in report["checks"] if item["name"] == check_name)
+                self.assertFalse(check["passed"])
+                self.assertIn(
+                    {"source_directory_error": "artifact entry must be a regular directory"},
+                    check["actual"],
+                )
+
+    def test_qualification_cli_reports_prediction_symlink_as_strict_json(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                predictions = artifact / "predictions.jsonl"
+                external_predictions = root / f"{run_id}-external-predictions.jsonl"
+                predictions.rename(external_predictions)
+                predictions.symlink_to(external_predictions)
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+
+            report = json.loads(
+                stdout.getvalue(), parse_constant=lambda value: self.fail(f"non-finite JSON constant: {value}")
+            )
+            self.assertFalse(report["eligible"])
+            for check_name in ("run1.predictions_readable", "run2.predictions_readable"):
+                check = next(item for item in report["checks"] if item["name"] == check_name)
+                self.assertFalse(check["passed"])
+                self.assertEqual(check["actual"], "artifact entry must be a regular file")
+
+    def test_command_failure_cannot_qualify_as_git_evidence(self):
+        config = read_config(run.DEFAULT_CONFIG)
+        failed = {"status": "error", "returncode": 128}
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", return_value=failed):
+            root = Path(folder)
+            first = run.execute_run(
+                config,
+                run.DEFAULT_CONFIG,
+                root,
+                "first",
+                MeasuredBackend(),
+                expected_commit=EXPECTED_COMMIT,
+                preflight_probe=FakeProbe(),
+            )
+            second = run.execute_run(
+                config,
+                run.DEFAULT_CONFIG,
+                root,
+                "second",
+                MeasuredBackend(),
+                expected_commit=EXPECTED_COMMIT,
+                preflight_probe=FakeProbe(),
+            )
+            result = run.qualify_baseline_runs(first, second)
+            self.assertFalse(result["eligible"])
+            failed_checks = {item["name"] for item in result["checks"] if not item["passed"]}
+            self.assertIn("run1.manifest_schema", failed_checks)
+            self.assertIn("run1.commit_preflight_consistency", failed_checks)
+
+    def test_qualification_rejects_self_consistent_fixed_file_tampering(self):
+        cases = ("contract", "profile")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                first, second = root / "first", root / "second"
+                make_measured_artifact(first, "first")
+                make_measured_artifact(second, "second")
+                for artifact in (first, second):
+                    if case == "contract":
+                        contract = json.loads((artifact / "contract.json").read_text(encoding="utf-8"))
+                        contract["metric"]["reproducibility"]["max_accuracy_delta"] = 1.0
+                        run.write_json(artifact / "contract.json", contract)
+                        manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                        manifest["contract"] = contract
+                        manifest["contract_sha256"] = run.sha256_json(contract)
+                        run.write_json(artifact / "manifest.json", manifest)
+                    else:
+                        preflight = json.loads((artifact / "preflight.json").read_text(encoding="utf-8"))
+                        preflight["profile"]["packages"]["torch"] = "0.0.0"
+                        preflight["observed"]["packages"]["torch"] = "0.0.0"
+                        preflight = evaluate_preflight(
+                            preflight["profile"], preflight["expected_commit"], FakeProbe(packages=preflight["observed"]["packages"])
+                        )
+                        run.write_json(artifact / "preflight.json", preflight)
+                result = run.qualify_baseline_runs(first, second)
+                self.assertFalse(result["eligible"])
+                failed_checks = {item["name"] for item in result["checks"] if not item["passed"]}
+                self.assertIn(f"run1.fixed_{case}", failed_checks)
+
+    def test_qualification_cli_reports_malformed_nested_artifacts(self):
+        cases = {
+            "preflight_observed": ("preflight.json", lambda value: value.update(observed=[]), "run2.preflight_passed"),
+            "contract_dataset": ("contract.json", lambda value: value.update(dataset=[]), "run2.contract_schema"),
+        }
+        for name, (filename, mutate, expected_failed_check) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                first, second = root / "first", root / "second"
+                make_measured_artifact(first, "first")
+                make_measured_artifact(second, "second")
+                artifact_path = second / filename
+                value = json.loads(artifact_path.read_text(encoding="utf-8"))
+                mutate(value)
+                run.write_json(artifact_path, value)
+
+                stdout = io.StringIO()
+                with patch.object(
+                    sys, "argv", ["mark2.run", "qualify", str(first), str(second)]
+                ), patch.object(sys, "stdout", stdout):
+                    self.assertEqual(run.main(), 1)
+                report = json.loads(stdout.getvalue())
+                self.assertFalse(report["eligible"])
+                failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+                self.assertIn(expected_failed_check, failed_checks)
+
+    def test_qualification_cli_rejects_non_choice_answer_values(self):
+        for answer_value in ("", "AB"):
+            with self.subTest(answer_value=answer_value), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                artifacts = (root / "first", root / "second")
+                for artifact, run_id in zip(artifacts, ("first", "second")):
+                    make_measured_artifact(artifact, run_id)
+                    rows = run._predictions(artifact / "predictions.jsonl")
+                    for row in rows:
+                        row.update(target=answer_value, prediction=answer_value, correct=True)
+                    with (artifact / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                        for row in rows:
+                            handle.write(json.dumps(row) + "\n")
+
+                stdout = io.StringIO()
+                with patch.object(
+                    sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+                ), patch.object(sys, "stdout", stdout):
+                    self.assertEqual(run.main(), 1)
+                report = json.loads(stdout.getvalue())
+                self.assertFalse(report["eligible"])
+                failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+                self.assertIn("run1.prediction_schema", failed_checks)
+                self.assertIn("run2.prediction_schema", failed_checks)
+
+    def test_qualification_cli_rejects_output_text_prediction_mismatch(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                rows = run._predictions(artifact / "predictions.jsonl")
+                for row in rows:
+                    row["output_text"] = "Answer: B"
+                with (artifact / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                    for row in rows:
+                        handle.write(json.dumps(row) + "\n")
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+            report = json.loads(stdout.getvalue())
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.prediction_schema", failed_checks)
+            self.assertIn("run2.prediction_schema", failed_checks)
+
+    def test_qualification_cli_reports_model_artifact_symlink_as_strict_json(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+            chat_template = artifacts[0] / "chat_template.txt"
+            chat_template.unlink()
+            chat_template.symlink_to("/proc/self/mem")
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+
+            report = json.loads(
+                stdout.getvalue(), parse_constant=lambda value: self.fail(f"non-finite JSON constant: {value}")
+            )
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.model_artifact_integrity", failed_checks)
+            check = next(item for item in report["checks"] if item["name"] == "run1.model_artifact_integrity")
+            self.assertEqual(check["actual"]["chat_template_error"], "artifact entry must be a regular file")
+
+    def test_qualification_cli_rejects_non_finite_generation_seconds(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                predictions = artifact / "predictions.jsonl"
+                predictions.write_text(
+                    predictions.read_text(encoding="utf-8").replace('"generation_seconds": 0.1', '"generation_seconds": 1e309'),
+                    encoding="utf-8",
+                )
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+            report = json.loads(stdout.getvalue())
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.prediction_schema", failed_checks)
+            self.assertIn("run2.prediction_schema", failed_checks)
+
+    def test_qualification_cli_reports_non_finite_metric_as_strict_json(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                manifest_path = artifact / "manifest.json"
+                manifest_path.write_text(
+                    manifest_path.read_text(encoding="utf-8").replace('"accuracy": 1.0', '"accuracy": NaN'),
+                    encoding="utf-8",
+                )
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+
+            def reject_non_finite(value):
+                raise ValueError(f"non-finite JSON constant: {value}")
+
+            report = json.loads(stdout.getvalue(), parse_constant=reject_non_finite)
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.metric_integrity", failed_checks)
+            self.assertIn("run2.metric_integrity", failed_checks)
+            metric_checks = [item for item in report["checks"] if item["name"].endswith(".metric_integrity")]
+            self.assertTrue(
+                all(item["actual"]["accuracy"] == {"non_finite_number": "NaN"} for item in metric_checks)
+            )
+
+    def test_qualification_cli_rejects_oversized_numbers_as_strict_json(self):
+        oversized = 10 ** 1000
+        for field in ("generation_seconds", "accuracy"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                artifacts = (root / "first", root / "second")
+                for artifact, run_id in zip(artifacts, ("first", "second")):
+                    make_measured_artifact(artifact, run_id)
+                    if field == "generation_seconds":
+                        rows = run._predictions(artifact / "predictions.jsonl")
+                        for row in rows:
+                            row[field] = oversized
+                        with (artifact / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                            for row in rows:
+                                handle.write(json.dumps(row) + "\n")
+                    else:
+                        manifest_path = artifact / "manifest.json"
+                        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                        manifest["metrics"][field] = oversized
+                        run.write_json(manifest_path, manifest)
+
+                stdout = io.StringIO()
+                with patch.object(
+                    sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+                ), patch.object(sys, "stdout", stdout):
+                    self.assertEqual(run.main(), 1)
+
+                report = json.loads(
+                    stdout.getvalue(),
+                    parse_constant=lambda value: self.fail(f"non-finite JSON constant: {value}"),
+                )
+                self.assertFalse(report["eligible"])
+                failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+                check_suffix = "prediction_schema" if field == "generation_seconds" else "metric_integrity"
+                self.assertIn(f"run1.{check_suffix}", failed_checks)
+                self.assertIn(f"run2.{check_suffix}", failed_checks)
+
+    def test_qualification_cli_reports_json_integer_conversion_failure(self):
+        oversized = "9" * 5001
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                predictions = artifact / "predictions.jsonl"
+                predictions.write_text(
+                    predictions.read_text(encoding="utf-8").replace(
+                        '"generation_seconds": 0.1', f'"generation_seconds": {oversized}'
+                    ),
+                    encoding="utf-8",
+                )
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+
+            report = json.loads(
+                stdout.getvalue(),
+                parse_constant=lambda value: self.fail(f"non-finite JSON constant: {value}"),
+            )
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.predictions_readable", failed_checks)
+            self.assertIn("run2.predictions_readable", failed_checks)
+
+    def test_qualification_cli_rejects_self_consistent_invalid_runtime(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                manifest["runtime"] = {
+                    "backend": "transformers",
+                    "dtype": "float32",
+                    "quantization": "4bit",
+                    "tf32": True,
+                    "cuda": "unexpected",
+                    "gpu_count": 8,
+                    "gpu_names": ["unexpected"] * 8,
+                }
+                run.write_json(artifact / "manifest.json", manifest)
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+            report = json.loads(stdout.getvalue())
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.runtime_consistency", failed_checks)
+            self.assertIn("run2.runtime_consistency", failed_checks)
+
+    def test_qualification_cli_rejects_type_invalid_metrics(self):
+        cases = {
+            "boolean_accuracy": lambda metrics: metrics.update(accuracy=True),
+            "float_count": lambda metrics: metrics.update(correct=float(metrics["correct"])),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                artifacts = (root / "first", root / "second")
+                for artifact, run_id in zip(artifacts, ("first", "second")):
+                    make_measured_artifact(artifact, run_id)
+                    manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                    mutate(manifest["metrics"])
+                    run.write_json(artifact / "manifest.json", manifest)
+
+                stdout = io.StringIO()
+                with patch.object(
+                    sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+                ), patch.object(sys, "stdout", stdout):
+                    self.assertEqual(run.main(), 1)
+                report = json.loads(stdout.getvalue())
+                self.assertFalse(report["eligible"])
+                failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+                self.assertIn("run1.metric_integrity", failed_checks)
+                self.assertIn("run2.metric_integrity", failed_checks)
+
+    def test_qualification_cli_rejects_type_invalid_dataset_selection_count(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = (root / "first", root / "second")
+            for artifact, run_id in zip(artifacts, ("first", "second")):
+                make_measured_artifact(artifact, run_id)
+                manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+                manifest["dataset_selection"]["count"] = float(manifest["dataset_selection"]["count"])
+                run.write_json(artifact / "manifest.json", manifest)
+
+            stdout = io.StringIO()
+            with patch.object(
+                sys, "argv", ["mark2.run", "qualify", *(str(path) for path in artifacts)]
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 1)
+            report = json.loads(stdout.getvalue())
+            self.assertFalse(report["eligible"])
+            failed_checks = {item["name"] for item in report["checks"] if not item["passed"]}
+            self.assertIn("run1.dataset_selection_integrity", failed_checks)
+            self.assertIn("run2.dataset_selection_integrity", failed_checks)
+
+    def test_qualification_rejects_representative_artifact_tampering(self):
+        def change_prediction(manifest, rows):
+            rows[0].update(prediction="B", correct=False)
+            manifest["metrics"] = run.aggregate(rows)
+
+        mutations = {
+            "mock_only": lambda manifest, rows: manifest.update(backend="mock", result_classification="mock-only"),
+            "unverified": lambda manifest, rows: manifest.update(result_classification="unverified"),
+            "incomplete": lambda manifest, rows: manifest.update(status="running"),
+            "failed_preflight": lambda manifest, rows: manifest["preflight"].update(passed=False),
+            "dirty_tree": lambda manifest, rows: manifest.update(git_status=" M mark2/run.py"),
+            "contract_hash": lambda manifest, rows: manifest.update(contract_sha256="0" * 64),
+            "source_hash": lambda manifest, rows: manifest["source_sha256"].update({"run.py": "0" * 64}),
+            "dataset_hash": lambda manifest, rows: manifest["dataset_selection"].update(sha256="0" * 64),
+            "chat_template_hash": lambda manifest, rows: manifest.update(chat_template_sha256="0" * 64),
+            "model_config_hash": lambda manifest, rows: manifest.update(model_config_sha256="0" * 64),
+            "missing_prediction_field": lambda manifest, rows: rows[0].pop("target"),
+            "wrong_prediction_type": lambda manifest, rows: rows[0].update(target=1),
+            "prediction_count": lambda manifest, rows: rows.pop(),
+            "duplicate_question": lambda manifest, rows: rows.__setitem__(1, {**rows[1], "question_sha256": rows[0]["question_sha256"]}),
+            "incorrect_metric": lambda manifest, rows: manifest["metrics"].update(accuracy=0.0),
+            "different_prediction": change_prediction,
+            "different_commit": lambda manifest, rows: manifest.update(git_commit="b" * 40),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                first, second = root / "first", root / "second"
+                make_measured_artifact(first, "first")
+                make_measured_artifact(second, "second")
+                manifest = json.loads((second / "manifest.json").read_text(encoding="utf-8"))
+                rows = run._predictions(second / "predictions.jsonl")
+                mutate(manifest, rows)
+                run.write_json(second / "manifest.json", manifest)
+                with (second / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                    for row in rows:
+                        handle.write(json.dumps(row) + "\n")
+                result = run.qualify_baseline_runs(first, second)
+                self.assertFalse(result["eligible"])
+                self.assertTrue(any(not item["passed"] for item in result["checks"]))
+
+    def test_qualification_rejects_same_run_and_cli_returns_nonzero(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first, second = root / "first", root / "second"
+            make_measured_artifact(first, "same")
+            make_measured_artifact(second, "same")
+            with patch.object(sys, "argv", ["mark2.run", "qualify", str(first), str(second)]), patch.object(sys, "stdout", io.StringIO()):
+                self.assertEqual(run.main(), 1)
+
+    def test_qualification_rejects_different_fixed_environment(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first, second = root / "first", root / "second"
+            make_measured_artifact(first, "first")
+            make_measured_artifact(second, "second")
+            profile = read_profile(run.DEFAULT_PROFILE)
+            changed_probe = FakeProbe(python_version=[3, 11, 9])
+            run.write_json(second / "preflight.json", evaluate_preflight(profile, EXPECTED_COMMIT, changed_probe))
+            result = run.qualify_baseline_runs(first, second)
+            self.assertFalse(result["eligible"])
+            failed = {item["name"] for item in result["checks"] if not item["passed"]}
+            self.assertIn("pair.same_fixed_environment", failed)
 
 
 class PreflightTests(unittest.TestCase):
