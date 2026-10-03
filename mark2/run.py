@@ -298,11 +298,16 @@ def execute_run(
     preflight_probe: SystemProbe | None = None,
 ) -> Path:
     validate_run_id(run_id)
+    experiment_contract_source: bytes | None = None
     if (experiment_contract is None) != (experiment_contract_path is None):
         raise ValueError("experiment contract and its source path must be provided together")
     if experiment_contract is not None and experiment_contract_path is not None:
         validate_experiment_contract(experiment_contract)
-        if read_experiment_contract(experiment_contract_path) != experiment_contract:
+        experiment_contract_source = experiment_contract_path.read_bytes()
+        source_contract = validate_experiment_contract(
+            json.loads(experiment_contract_source.decode("utf-8"))
+        )
+        if source_contract != experiment_contract:
             raise ValueError("experiment contract does not match its source file")
     run_dir = output_root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -323,9 +328,9 @@ def execute_run(
         "source_sha256": _snapshot(run_dir, profile_path),
         "result_classification": "unverified" if backend.name == "transformers" else "mock-only",
     }
-    if experiment_contract is not None and experiment_contract_path is not None:
+    if experiment_contract is not None and experiment_contract_source is not None:
         experiment_filename = "experiment_contract.json"
-        shutil.copyfile(experiment_contract_path, run_dir / experiment_filename)
+        (run_dir / experiment_filename).write_bytes(experiment_contract_source)
         manifest["experiment_contract"] = experiment_contract
         manifest["experiment_contract_sha256"] = sha256_json(experiment_contract)
         manifest["experiment_contract_file"] = experiment_filename

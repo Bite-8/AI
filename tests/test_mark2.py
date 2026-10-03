@@ -349,6 +349,40 @@ class ArtifactTests(unittest.TestCase):
             self.assertFalse(backend.called)
             self.assertFalse((root / "invalid-experiment").exists())
 
+    def test_experiment_contract_source_change_during_setup_cannot_change_saved_copy(self):
+        config = read_config(run.DEFAULT_CONFIG)
+        original = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+        changed = deepcopy(original)
+        changed["hypothesis_id"] = "changed-after-validation"
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "experiment_contract.json"
+            shutil.copyfile(run.DEFAULT_EXPERIMENT_CONTRACT, source)
+            original_collect = run.collect
+
+            def change_source_during_setup(run_dir):
+                run.write_json(source, changed)
+                return original_collect(run_dir)
+
+            with patch("mark2.run.collect", side_effect=change_source_during_setup):
+                artifact = run.execute_run(
+                    config,
+                    run.DEFAULT_CONFIG,
+                    root,
+                    "source-change",
+                    run.MockBackend(),
+                    experiment_contract=original,
+                    experiment_contract_path=source,
+                )
+
+            manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+            saved = json.loads((artifact / manifest["experiment_contract_file"]).read_text(encoding="utf-8"))
+            self.assertEqual(original, saved)
+            self.assertNotEqual(changed, saved)
+            self.assertEqual(manifest["experiment_contract"], saved)
+            self.assertEqual(manifest["experiment_contract_sha256"], run.sha256_json(saved))
+
     def test_existing_run_is_never_overwritten(self):
         config = read_config(run.DEFAULT_CONFIG)
         with tempfile.TemporaryDirectory() as folder:
