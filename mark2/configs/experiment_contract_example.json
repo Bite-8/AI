@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "experiment_id": "example-controlled-experiment-v1",
+  "hypothesis_id": "example-hypothesis-not-evaluated",
+  "independent_variable": {
+    "id": "example-intervention",
+    "description": "Placeholder intervention used only to validate experiment-contract bookkeeping."
+  },
+  "primary_metric": {
+    "name": "exact_match_accuracy",
+    "direction": "increase"
+  },
+  "decision_rule": {
+    "minimum_accuracy_difference": 0.01,
+    "significance_level": 0.05,
+    "paired_test": "exact-binomial-discordant-one-sided",
+    "require_identical_variant_predictions": true
+  }
+}

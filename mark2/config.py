@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
+STABLE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 
 
 def canonical_json(value: Any) -> bytes:
@@ -112,6 +114,81 @@ def validate_config(config: Any) -> dict[str, Any]:
 
 def read_config(path: Path) -> dict[str, Any]:
     return validate_config(json.loads(path.read_text(encoding="utf-8")))
+
+
+def _stable_id(value: Any, label: str) -> None:
+    if not isinstance(value, str) or not STABLE_ID.fullmatch(value):
+        raise ValueError(f"{label} must use 1-80 letters, digits, dot, underscore, or hyphen")
+
+
+def _finite_number(value: Any, label: str) -> float:
+    if type(value) not in (int, float) or not math.isfinite(value):
+        raise ValueError(f"{label} must be a finite number")
+    return float(value)
+
+
+def validate_experiment_contract(contract: Any) -> dict[str, Any]:
+    """Validate a preregistered controlled-experiment contract."""
+    contract = _exact_keys(
+        contract,
+        {
+            "schema_version",
+            "experiment_id",
+            "hypothesis_id",
+            "independent_variable",
+            "primary_metric",
+            "decision_rule",
+        },
+        "experiment contract",
+    )
+    if type(contract["schema_version"]) is not int or contract["schema_version"] != 1:
+        raise ValueError("experiment contract schema_version must be 1")
+    _stable_id(contract["experiment_id"], "experiment_id")
+    _stable_id(contract["hypothesis_id"], "hypothesis_id")
+
+    variable = _exact_keys(
+        contract["independent_variable"], {"id", "description"}, "independent_variable"
+    )
+    _stable_id(variable["id"], "independent_variable.id")
+    description = variable["description"]
+    if (
+        not isinstance(description, str)
+        or description != description.strip()
+        or not 1 <= len(description) <= 500
+    ):
+        raise ValueError("independent_variable.description must be 1-500 non-whitespace-edge characters")
+
+    metric = _exact_keys(contract["primary_metric"], {"name", "direction"}, "primary_metric")
+    if metric["name"] != "exact_match_accuracy":
+        raise ValueError("primary_metric.name must be exact_match_accuracy")
+    if metric["direction"] != "increase":
+        raise ValueError("primary_metric.direction must be increase")
+
+    rule = _exact_keys(
+        contract["decision_rule"],
+        {
+            "minimum_accuracy_difference",
+            "significance_level",
+            "paired_test",
+            "require_identical_variant_predictions",
+        },
+        "decision_rule",
+    )
+    minimum = _finite_number(rule["minimum_accuracy_difference"], "minimum_accuracy_difference")
+    if not 0 <= minimum <= 1:
+        raise ValueError("minimum_accuracy_difference must be between 0 and 1")
+    significance = _finite_number(rule["significance_level"], "significance_level")
+    if not 0 < significance < 1:
+        raise ValueError("significance_level must be greater than 0 and less than 1")
+    if rule["paired_test"] != "exact-binomial-discordant-one-sided":
+        raise ValueError("unsupported decision_rule.paired_test")
+    if not isinstance(rule["require_identical_variant_predictions"], bool):
+        raise ValueError("require_identical_variant_predictions must be boolean")
+    return contract
+
+
+def read_experiment_contract(path: Path) -> dict[str, Any]:
+    return validate_experiment_contract(json.loads(path.read_text(encoding="utf-8")))
 
 
 def validate_run_id(value: str) -> str:

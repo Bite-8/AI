@@ -18,7 +18,14 @@ from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
 
-from .config import read_config, sha256_json, validate_config, validate_run_id
+from .config import (
+    read_config,
+    read_experiment_contract,
+    sha256_json,
+    validate_config,
+    validate_experiment_contract,
+    validate_run_id,
+)
 from .environment import SystemProbe, collect, command, evaluate_preflight, read_profile
 
 
@@ -26,6 +33,7 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = PACKAGE_DIR.parent
 DEFAULT_CONFIG = PACKAGE_DIR / "configs" / "qwen35_9b_mmlu.json"
 DEFAULT_PROFILE = PACKAGE_DIR / "configs" / "qwen35_9b_l4_profile.json"
+DEFAULT_EXPERIMENT_CONTRACT = PACKAGE_DIR / "configs" / "experiment_contract_example.json"
 ANSWER = re.compile(r"(?<![A-Za-z])([A-D])(?![A-Za-z])", re.IGNORECASE)
 
 
@@ -283,11 +291,19 @@ def execute_run(
     run_id: str,
     backend: Any,
     *,
+    experiment_contract: dict[str, Any] | None = None,
+    experiment_contract_path: Path | None = None,
     expected_commit: str | None = None,
     profile_path: Path = DEFAULT_PROFILE,
     preflight_probe: SystemProbe | None = None,
 ) -> Path:
     validate_run_id(run_id)
+    if (experiment_contract is None) != (experiment_contract_path is None):
+        raise ValueError("experiment contract and its source path must be provided together")
+    if experiment_contract is not None and experiment_contract_path is not None:
+        validate_experiment_contract(experiment_contract)
+        if read_experiment_contract(experiment_contract_path) != experiment_contract:
+            raise ValueError("experiment contract does not match its source file")
     run_dir = output_root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     shutil.copyfile(config_path, run_dir / "contract.json")
@@ -307,6 +323,12 @@ def execute_run(
         "source_sha256": _snapshot(run_dir, profile_path),
         "result_classification": "unverified" if backend.name == "transformers" else "mock-only",
     }
+    if experiment_contract is not None and experiment_contract_path is not None:
+        experiment_filename = "experiment_contract.json"
+        shutil.copyfile(experiment_contract_path, run_dir / experiment_filename)
+        manifest["experiment_contract"] = experiment_contract
+        manifest["experiment_contract_sha256"] = sha256_json(experiment_contract)
+        manifest["experiment_contract_file"] = experiment_filename
     write_json(run_dir / "manifest.json", manifest)
     started = time.perf_counter()
     try:
@@ -1043,6 +1065,10 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check-config", help="validate the contract without ML imports or downloads")
     check.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    check_experiment = commands.add_parser(
+        "check-experiment-contract", help="validate an experiment contract without running a backend"
+    )
+    check_experiment.add_argument("--experiment-contract", type=Path, default=DEFAULT_EXPERIMENT_CONTRACT)
     preflight = commands.add_parser("preflight", help="validate the host without model or dataset downloads")
     preflight.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
     preflight.add_argument("--expected-commit", required=True)
@@ -1055,6 +1081,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--run-id", help="unique artifact directory name")
     run.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
     run.add_argument("--expected-commit", help="approved repository commit; required by transformers backend")
+    run.add_argument("--experiment-contract", type=Path, help="preregistered controlled-experiment contract")
     compare = commands.add_parser("compare", help="apply the configured reproducibility tolerance to two runs")
     compare.add_argument("first", type=Path)
     compare.add_argument("second", type=Path)
@@ -1073,6 +1100,10 @@ def main() -> int:
         if args.command == "check-config":
             config = read_config(args.config)
             print(json.dumps({"valid": True, "contract_sha256": sha256_json(config)}, indent=2))
+            return 0
+        if args.command == "check-experiment-contract":
+            contract = read_experiment_contract(args.experiment_contract)
+            print(json.dumps({"valid": True, "experiment_contract_sha256": sha256_json(contract)}, indent=2))
             return 0
         if args.command == "compare":
             result = compare_runs(args.first, args.second)
@@ -1102,6 +1133,9 @@ def main() -> int:
             return 0 if report["passed"] else 1
 
         config = read_config(args.config)
+        experiment_contract = (
+            read_experiment_contract(args.experiment_contract) if args.experiment_contract else None
+        )
         run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid4().hex[:8]
         backend = MockBackend() if args.backend == "mock" else TransformersBackend()
         run_dir = execute_run(
@@ -1110,6 +1144,8 @@ def main() -> int:
             args.output_root,
             run_id,
             backend,
+            experiment_contract=experiment_contract,
+            experiment_contract_path=args.experiment_contract,
             expected_commit=args.expected_commit,
             profile_path=args.profile,
         )
