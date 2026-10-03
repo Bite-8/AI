@@ -10,7 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mark2 import run
-from mark2.config import read_config, validate_config
+from mark2.config import (
+    read_config,
+    read_experiment_contract,
+    validate_config,
+    validate_experiment_contract,
+)
 from mark2.environment import evaluate_preflight, read_profile
 
 
@@ -183,6 +188,90 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNone(run.parse_answer("unknown"))
 
 
+class ExperimentContractTests(unittest.TestCase):
+    def setUp(self):
+        self.contract = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+
+    def test_fixed_example_is_valid_but_not_an_experiment_result(self):
+        self.assertEqual(self.contract["schema_version"], 1)
+        self.assertEqual(self.contract["primary_metric"]["name"], "exact_match_accuracy")
+        self.assertIn("not-evaluated", self.contract["hypothesis_id"])
+
+    def test_exact_keys_are_required_at_every_level(self):
+        cases = []
+        for path, key in (
+            ((), "hypothesis_id"),
+            (("independent_variable",), "description"),
+            (("primary_metric",), "direction"),
+            (("decision_rule",), "paired_test"),
+        ):
+            missing = deepcopy(self.contract)
+            target = missing
+            for part in path:
+                target = target[part]
+            target.pop(key)
+            cases.append(missing)
+
+            unknown = deepcopy(self.contract)
+            target = unknown
+            for part in path:
+                target = target[part]
+            target["unknown"] = "value"
+            cases.append(unknown)
+
+        for contract in cases:
+            with self.subTest(contract=contract):
+                with self.assertRaisesRegex(ValueError, "exactly"):
+                    validate_experiment_contract(contract)
+
+    def test_ids_descriptions_and_enums_are_strict(self):
+        mutations = (
+            lambda value: value.update(schema_version=True),
+            lambda value: value.update(experiment_id=""),
+            lambda value: value.update(hypothesis_id="contains spaces"),
+            lambda value: value["independent_variable"].update(id="x" * 81),
+            lambda value: value["independent_variable"].update(description=" "),
+            lambda value: value["independent_variable"].update(description=" padded"),
+            lambda value: value["primary_metric"].update(name="accuracy"),
+            lambda value: value["primary_metric"].update(direction="decrease"),
+            lambda value: value["decision_rule"].update(paired_test="t-test"),
+        )
+        for mutate in mutations:
+            contract = deepcopy(self.contract)
+            mutate(contract)
+            with self.subTest(contract=contract):
+                with self.assertRaises(ValueError):
+                    validate_experiment_contract(contract)
+
+    def test_numeric_boolean_and_boundary_values_are_strict(self):
+        valid_boundaries = ((0, 0.0001), (1, 0.9999))
+        for minimum, significance in valid_boundaries:
+            contract = deepcopy(self.contract)
+            contract["decision_rule"].update(
+                minimum_accuracy_difference=minimum, significance_level=significance
+            )
+            validate_experiment_contract(contract)
+
+        invalid_values = (
+            ("minimum_accuracy_difference", True),
+            ("minimum_accuracy_difference", -0.01),
+            ("minimum_accuracy_difference", 1.01),
+            ("minimum_accuracy_difference", float("nan")),
+            ("minimum_accuracy_difference", float("inf")),
+            ("significance_level", False),
+            ("significance_level", 0),
+            ("significance_level", 1),
+            ("significance_level", "0.05"),
+            ("require_identical_variant_predictions", 1),
+        )
+        for field, invalid in invalid_values:
+            contract = deepcopy(self.contract)
+            contract["decision_rule"][field] = invalid
+            with self.subTest(field=field, invalid=invalid):
+                with self.assertRaises(ValueError):
+                    validate_experiment_contract(contract)
+
+
 class ArtifactTests(unittest.TestCase):
     def test_mock_runs_are_separate_and_compare_reproducibly(self):
         config = read_config(run.DEFAULT_CONFIG)
@@ -197,6 +286,102 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(manifest["status"], "completed")
             self.assertEqual(manifest["metrics"]["accuracy"], 1.0)
             self.assertEqual(manifest["result_classification"], "mock-only")
+            self.assertNotIn("experiment_contract", manifest)
+
+    def test_experiment_contract_is_recorded_before_backend_and_detects_tampering(self):
+        class InspectingBackend(run.MockBackend):
+            def run(self, config, manifest, run_dir):
+                saved = json.loads((run_dir / "experiment_contract.json").read_text(encoding="utf-8"))
+                self.recorded_before_run = (
+                    manifest["experiment_contract"] == saved
+                    and manifest["experiment_contract_sha256"] == run.sha256_json(saved)
+                    and manifest["experiment_contract_file"] == "experiment_contract.json"
+                )
+                return super().run(config, manifest, run_dir)
+
+        config = read_config(run.DEFAULT_CONFIG)
+        experiment = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+        backend = InspectingBackend()
+        with tempfile.TemporaryDirectory() as folder:
+            artifact = run.execute_run(
+                config,
+                run.DEFAULT_CONFIG,
+                Path(folder),
+                "experiment",
+                backend,
+                experiment_contract=experiment,
+                experiment_contract_path=run.DEFAULT_EXPERIMENT_CONTRACT,
+            )
+            self.assertTrue(backend.recorded_before_run)
+            manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+            saved = json.loads((artifact / manifest["experiment_contract_file"]).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["experiment_contract"], saved)
+            self.assertEqual(manifest["experiment_contract_sha256"], run.sha256_json(saved))
+
+            saved["hypothesis_id"] = "tampered-hypothesis"
+            run.write_json(artifact / manifest["experiment_contract_file"], saved)
+            self.assertNotEqual(manifest["experiment_contract_sha256"], run.sha256_json(saved))
+
+    def test_invalid_experiment_contract_is_rejected_before_artifact_or_backend(self):
+        class TrackingBackend(run.MockBackend):
+            called = False
+
+            def run(self, config, manifest, run_dir):
+                self.called = True
+                return super().run(config, manifest, run_dir)
+
+        config = read_config(run.DEFAULT_CONFIG)
+        experiment = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+        experiment["decision_rule"]["significance_level"] = 0
+        backend = TrackingBackend()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with self.assertRaises(ValueError):
+                run.execute_run(
+                    config,
+                    run.DEFAULT_CONFIG,
+                    root,
+                    "invalid-experiment",
+                    backend,
+                    experiment_contract=experiment,
+                    experiment_contract_path=run.DEFAULT_EXPERIMENT_CONTRACT,
+                )
+            self.assertFalse(backend.called)
+            self.assertFalse((root / "invalid-experiment").exists())
+
+    def test_experiment_contract_source_change_during_setup_cannot_change_saved_copy(self):
+        config = read_config(run.DEFAULT_CONFIG)
+        original = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+        changed = deepcopy(original)
+        changed["hypothesis_id"] = "changed-after-validation"
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "experiment_contract.json"
+            shutil.copyfile(run.DEFAULT_EXPERIMENT_CONTRACT, source)
+            original_collect = run.collect
+
+            def change_source_during_setup(run_dir):
+                run.write_json(source, changed)
+                return original_collect(run_dir)
+
+            with patch("mark2.run.collect", side_effect=change_source_during_setup):
+                artifact = run.execute_run(
+                    config,
+                    run.DEFAULT_CONFIG,
+                    root,
+                    "source-change",
+                    run.MockBackend(),
+                    experiment_contract=original,
+                    experiment_contract_path=source,
+                )
+
+            manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+            saved = json.loads((artifact / manifest["experiment_contract_file"]).read_text(encoding="utf-8"))
+            self.assertEqual(original, saved)
+            self.assertNotEqual(changed, saved)
+            self.assertEqual(manifest["experiment_contract"], saved)
+            self.assertEqual(manifest["experiment_contract_sha256"], run.sha256_json(saved))
 
     def test_existing_run_is_never_overwritten(self):
         config = read_config(run.DEFAULT_CONFIG)

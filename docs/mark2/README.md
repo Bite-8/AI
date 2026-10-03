@@ -76,6 +76,30 @@ PR #31では次の二段階が承認済みである。
 
 各runはcommit、作業ツリー、環境、依存、GPU、source hash、時間、peak memory、予測、metric、成否をrun ID別artifactへ保存する。mock結果は`mock-only`、未実行の実機結果は`unverified`として区別する。
 
+## Controlled experiment contract
+
+variantを実行する前に、baseline評価契約とは別のcontrolled experiment contractを作成する。形式例は [`mark2/configs/experiment_contract_example.json`](../../mark2/configs/experiment_contract_example.json) である。この例はvalidatorとartifact記録の確認専用であり、実際の脳科学的仮説、variant結果、仮説支持を表さない。
+
+contractは次を結果取得前に固定する。
+
+- `experiment_id`と`hypothesis_id`: 1〜80文字の安定した識別子
+- `independent_variable`: 変更を許可する一つの識別子と説明
+- `primary_metric`: `exact_match_accuracy`を増加させる方向
+- `decision_rule`: 最小accuracy差、有意水準、one-sided exact paired testの識別子、variant 2 runの予測一致要件
+
+未知・欠落key、不正な型やID、非有限数、範囲外の値は拒否される。特にbooleanを数値としては受理しない。まず作成したcontract単体を検査し、成功後に同じファイルをrunnerへ指定する。
+
+```bash
+python3 -m mark2.run check-experiment-contract \
+  --experiment-contract mark2/configs/experiment_contract_example.json
+python3 -m mark2.run run --backend mock --run-id experiment-bookkeeping \
+  --experiment-contract mark2/configs/experiment_contract_example.json
+```
+
+指定時、runnerはbackend開始前に検証済み本体、canonical JSONのSHA-256、入力copyのファイル名を`manifest.json`へ保存し、run directoryへ`experiment_contract.json`をcopyする。保存copyを読み直して同じcanonical hashを計算すれば、本体・宣言hash・copyの対応を再検証できる。不正なcontractはrun directory作成前にnon-zeroで拒否される。`--experiment-contract`を指定しない既存baseline runのartifact形式は変わらない。
+
+この段階では実機variantを実行せず、baseline/variant計4 artifactの適格性、paired統計、p-value・効果量、`supported` / `inconclusive` / `regressed`の判定も行わない。それらは固定済みcontractを入力にする後続作業である。
+
 実機hostの承認済み条件は [`mark2/configs/qwen35_9b_l4_profile.json`](../../mark2/configs/qwen35_9b_l4_profile.json) に固定する。Python 3.10以上、`mark2/requirements.txt`のexact pin、CUDA/BF16、NVIDIA L4 1基、22,500 MiB以上のVRAM、開始時100 GiB以上の空き容量を要求する。実行時には別途、承認対象となったrepository commitの完全なSHAを渡す。
 
 ## 実行方法
@@ -84,6 +108,7 @@ PR #31では次の二段階が承認済みである。
 
 ```bash
 python3 -m mark2.run check-config
+python3 -m mark2.run check-experiment-contract
 python3 -m unittest discover -s tests -v
 python3 -m mark2.run run --backend mock --run-id mock-1
 python3 -m mark2.run run --backend mock --run-id mock-2
