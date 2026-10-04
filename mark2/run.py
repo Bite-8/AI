@@ -1040,6 +1040,241 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
     }
 
 
+def qualify_experiment_artifacts(
+    baseline_first: Path,
+    baseline_second: Path,
+    variant_first: Path,
+    variant_second: Path,
+) -> dict[str, Any]:
+    """Validate four artifacts before controlled-experiment statistics are allowed."""
+    paths = (baseline_first, baseline_second, variant_first, variant_second)
+    checks: list[dict[str, Any]] = []
+    manifests: list[dict[str, Any] | None] = []
+    preflights: list[dict[str, Any] | None] = []
+    predictions: list[list[dict[str, Any]] | None] = []
+    experiment_contracts: list[dict[str, Any] | None] = []
+
+    baseline_result = qualify_baseline_runs(baseline_first, baseline_second)
+    variant_result = qualify_baseline_runs(variant_first, variant_second)
+    for pair_name, result in (("baseline", baseline_result), ("variant", variant_result)):
+        for check in result["checks"]:
+            if pair_name == "variant" and check["name"] in {
+                "pair.identical_predictions",
+                "pair.accuracy_delta",
+            }:
+                continue
+            checks.append({**check, "name": f"{pair_name}.{check['name']}"})
+
+    for index, path in enumerate(paths, 1):
+        prefix = f"run{index}"
+        manifest, _ = _read_json_object(path / "manifest.json")
+        preflight, _ = _read_json_object(path / "preflight.json")
+        rows, _ = _read_prediction_rows(path / "predictions.jsonl")
+        manifests.append(manifest)
+        preflights.append(preflight)
+        predictions.append(rows)
+
+        embedded = manifest.get("experiment_contract") if isinstance(manifest, dict) else None
+        declared_hash = (
+            manifest.get("experiment_contract_sha256") if isinstance(manifest, dict) else None
+        )
+        filename = manifest.get("experiment_contract_file") if isinstance(manifest, dict) else None
+        declaration_valid = (
+            isinstance(embedded, dict)
+            and isinstance(declared_hash, str)
+            and bool(re.fullmatch(r"[0-9a-f]{64}", declared_hash))
+            and filename == "experiment_contract.json"
+        )
+        _qualification_check(
+            checks,
+            f"{prefix}.experiment_contract_declaration",
+            "embedded contract, canonical SHA-256, and experiment_contract.json",
+            {"contract": embedded, "sha256": declared_hash, "file": filename},
+            declaration_valid,
+            "manifest must declare the preregistered experiment contract and its saved copy",
+        )
+
+        saved, saved_error = _read_regular_json_object(path / "experiment_contract.json")
+        schema_error = None
+        try:
+            if saved is not None:
+                validate_experiment_contract(saved)
+            else:
+                schema_error = saved_error
+        except (KeyError, TypeError, ValueError) as exc:
+            schema_error = str(exc)
+        _qualification_check(
+            checks,
+            f"{prefix}.experiment_contract_schema",
+            "valid controlled-experiment contract",
+            schema_error,
+            saved is not None and schema_error is None,
+            "saved experiment contract must be a readable regular file satisfying its schema",
+        )
+        integrity_valid = (
+            saved is not None
+            and declaration_valid
+            and embedded == saved
+            and declared_hash == sha256_json(saved)
+        )
+        _qualification_check(
+            checks,
+            f"{prefix}.experiment_contract_integrity",
+            True,
+            {
+                "copy_error": saved_error,
+                "copy_sha256": sha256_json(saved) if saved is not None else None,
+                "declared_sha256": declared_hash,
+            },
+            integrity_valid,
+            "saved copy, embedded contract, and declared canonical hash must agree",
+        )
+        experiment_contracts.append(saved if schema_error is None else None)
+
+    resolved = [str(path.resolve()) for path in paths]
+    _qualification_check(
+        checks,
+        "experiment.distinct_artifact_directories",
+        4,
+        resolved,
+        len(set(resolved)) == 4,
+        "all four runs must use distinct artifact directories",
+    )
+    run_ids = [manifest.get("run_id") if isinstance(manifest, dict) else None for manifest in manifests]
+    _qualification_check(
+        checks,
+        "experiment.distinct_run_ids",
+        4,
+        run_ids,
+        None not in run_ids and len(set(run_ids)) == 4,
+        "all four runs must have independent run IDs",
+    )
+    contract_hashes = [
+        manifest.get("experiment_contract_sha256") if isinstance(manifest, dict) else None
+        for manifest in manifests
+    ]
+    _qualification_check(
+        checks,
+        "experiment.same_experiment_contract",
+        "identical valid contract and hash",
+        contract_hashes,
+        experiment_contracts[0] is not None
+        and all(contract == experiment_contracts[0] for contract in experiment_contracts)
+        and all(value == contract_hashes[0] for value in contract_hashes),
+        "all four runs must belong to the same preregistered experiment",
+    )
+
+    variant_rule = (
+        experiment_contracts[0].get("decision_rule")
+        if isinstance(experiment_contracts[0], dict)
+        else None
+    )
+    require_identical = (
+        variant_rule.get("require_identical_variant_predictions")
+        if isinstance(variant_rule, dict)
+        else None
+    )
+    variant_signatures = [
+        [(row.get("question_sha256"), row.get("prediction")) for row in rows]
+        if rows is not None
+        else None
+        for rows in predictions[2:]
+    ]
+    variant_identical = (
+        variant_signatures[0] is not None and variant_signatures[0] == variant_signatures[1]
+    )
+    _qualification_check(
+        checks,
+        "variant.pair.identical_predictions",
+        require_identical,
+        variant_identical,
+        isinstance(require_identical, bool) and (variant_identical or not require_identical),
+        "variant predictions must satisfy the preregistered reproducibility condition",
+    )
+
+    for field in (
+        "contract_sha256",
+        "contract",
+        "dataset_selection",
+        "chat_template_sha256",
+        "model_config_sha256",
+        "runtime",
+    ):
+        actual = [manifest.get(field) if isinstance(manifest, dict) else None for manifest in manifests]
+        _qualification_check(
+            checks,
+            f"experiment.same_{field}",
+            "identical",
+            actual,
+            actual[0] is not None and all(value == actual[0] for value in actual),
+            f"baseline and variant runs must use the same {field}",
+        )
+
+    question_targets = [
+        [(row.get("question_sha256"), row.get("target")) for row in rows]
+        if rows is not None
+        else None
+        for rows in predictions
+    ]
+    _qualification_check(
+        checks,
+        "experiment.same_question_order_and_targets",
+        "identical",
+        question_targets,
+        question_targets[0] is not None and all(value == question_targets[0] for value in question_targets),
+        "all runs must evaluate the same questions in the same order with the same targets",
+    )
+
+    fixed_hosts = []
+    for preflight in preflights:
+        observed = preflight.get("observed") if isinstance(preflight, dict) else None
+        fixed_hosts.append(
+            {
+                "profile": preflight.get("profile") if isinstance(preflight, dict) else None,
+                "python_version": observed.get("python_version") if isinstance(observed, dict) else None,
+                "packages": observed.get("packages") if isinstance(observed, dict) else None,
+                "accelerator": observed.get("accelerator") if isinstance(observed, dict) else None,
+            }
+        )
+    _qualification_check(
+        checks,
+        "experiment.same_fixed_environment",
+        "identical",
+        fixed_hosts,
+        fixed_hosts[0]["profile"] is not None and all(value == fixed_hosts[0] for value in fixed_hosts),
+        "all runs must use the same profile, Python, dependencies, and accelerator conditions",
+    )
+
+    pair_sources = {}
+    for name, pair in (("baseline", manifests[:2]), ("variant", manifests[2:])):
+        pair_sources[name] = [
+            {
+                "git_commit": manifest.get("git_commit"),
+                "source_sha256": manifest.get("source_sha256"),
+            }
+            if isinstance(manifest, dict)
+            else None
+            for manifest in pair
+        ]
+        _qualification_check(
+            checks,
+            f"{name}.pair.commit_and_source",
+            "identical within pair",
+            pair_sources[name],
+            pair_sources[name][0] is not None and pair_sources[name][0] == pair_sources[name][1],
+            f"{name} runs must use one commit and source snapshot; the other pair may differ",
+        )
+
+    return {
+        "schema_version": 1,
+        "mode": "repository-measured-controlled-experiment-qualification",
+        "run_ids": run_ids,
+        "pair_sources": pair_sources,
+        "eligible": all(check["passed"] for check in checks),
+        "checks": checks,
+    }
+
+
 def compare_runs(first: Path, second: Path) -> dict[str, Any]:
     manifests = [json.loads((path / "manifest.json").read_text(encoding="utf-8")) for path in (first, second)]
     if any(item.get("status") != "completed" for item in manifests):
@@ -1095,6 +1330,15 @@ def build_parser() -> argparse.ArgumentParser:
     qualify.add_argument("first", type=Path)
     qualify.add_argument("second", type=Path)
     qualify.add_argument("--output", type=Path)
+    qualify_experiment = commands.add_parser(
+        "qualify-experiment",
+        help="validate baseline and variant artifact pairs before statistical analysis",
+    )
+    qualify_experiment.add_argument("baseline_first", type=Path)
+    qualify_experiment.add_argument("baseline_second", type=Path)
+    qualify_experiment.add_argument("variant_first", type=Path)
+    qualify_experiment.add_argument("variant_second", type=Path)
+    qualify_experiment.add_argument("--output", type=Path)
     return parser
 
 
@@ -1121,6 +1365,20 @@ def main() -> int:
             return 0 if result["reproducible"] else 1
         if args.command == "qualify":
             result = qualify_baseline_runs(args.first, args.second)
+            payload = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                with args.output.open("x", encoding="utf-8") as handle:
+                    handle.write(payload)
+            print(payload, end="")
+            return 0 if result["eligible"] else 1
+        if args.command == "qualify-experiment":
+            result = qualify_experiment_artifacts(
+                args.baseline_first,
+                args.baseline_second,
+                args.variant_first,
+                args.variant_second,
+            )
             payload = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
