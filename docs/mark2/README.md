@@ -98,7 +98,20 @@ python3 -m mark2.run run --backend mock --run-id experiment-bookkeeping \
 
 指定時、runnerはbackend開始前に検証済み本体、canonical JSONのSHA-256、入力copyのファイル名を`manifest.json`へ保存し、run directoryへ`experiment_contract.json`をcopyする。保存copyを読み直して同じcanonical hashを計算すれば、本体・宣言hash・copyの対応を再検証できる。不正なcontractはrun directory作成前にnon-zeroで拒否される。`--experiment-contract`を指定しない既存baseline runのartifact形式は変わらない。
 
-この段階では実機variantを実行せず、baseline/variant計4 artifactの適格性、paired統計、p-value・効果量、`supported` / `inconclusive` / `regressed`の判定も行わない。それらは固定済みcontractを入力にする後続作業である。
+controlled experimentは「contract固定 → baseline 2 runとvariant 2 run → 4 artifactの適格性判定」の順に進める。4 runすべてで同じ`--experiment-contract`を指定し、結果取得後に次を実行する。
+
+```bash
+python3 -m mark2.run qualify-experiment \
+  artifacts/mark2/baseline-01 \
+  artifacts/mark2/baseline-02 \
+  artifacts/mark2/variant-01 \
+  artifacts/mark2/variant-02 \
+  --output artifacts/mark2/experiment-qualification.json
+```
+
+位置引数はbaseline 2 run、variant 2 runの順である。`qualify-experiment`は各artifactに既存のrepository-measured検査を適用し、experiment contractの本体・canonical SHA-256・保存copy、全directory/run IDの一意性、各pair内のcommit/source/固定環境、variantの事前登録済み予測再現条件、pair間の評価contract・sample順・target・prompt/model/runtime条件を検査する。baselineとvariantのcommit/source差だけは許可し、`pair_sources`へ明示する。
+
+reportの`eligible`は統計処理へ渡せるartifact集合であることだけを表す。1 checkでも不合格ならexit code 1となり、統計へ進めない。paired統計、p-value・効果量、`supported` / `inconclusive` / `regressed`の仮説判定は未実装であり、このcommandはそれらを出力しない。
 
 実機hostの承認済み条件は [`mark2/configs/qwen35_9b_l4_profile.json`](../../mark2/configs/qwen35_9b_l4_profile.json) に固定する。Python 3.10以上、`mark2/requirements.txt`のexact pin、CUDA/BF16、NVIDIA L4 1基、22,500 MiB以上のVRAM、開始時100 GiB以上の空き容量を要求する。実行時には別途、承認対象となったrepository commitの完全なSHAを渡す。
 

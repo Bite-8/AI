@@ -89,6 +89,19 @@ def make_measured_artifact(path, run_id):
     run.write_json(path / "manifest.json", manifest)
 
 
+def attach_experiment_contract(path, contract=None):
+    contract = contract or read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+    run.write_json(path / "experiment_contract.json", contract)
+    manifest_path = path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update(
+        experiment_contract=contract,
+        experiment_contract_sha256=run.sha256_json(contract),
+        experiment_contract_file="experiment_contract.json",
+    )
+    run.write_json(manifest_path, manifest)
+
+
 class MeasuredBackend:
     name = "transformers"
 
@@ -998,6 +1011,123 @@ class ArtifactTests(unittest.TestCase):
             self.assertFalse(result["eligible"])
             failed = {item["name"] for item in result["checks"] if not item["passed"]}
             self.assertIn("pair.same_fixed_environment", failed)
+
+
+class ExperimentQualificationTests(unittest.TestCase):
+    def make_artifacts(self, root):
+        artifacts = tuple(root / name for name in ("baseline-1", "baseline-2", "variant-1", "variant-2"))
+        for artifact, run_id in zip(artifacts, ("baseline-1", "baseline-2", "variant-1", "variant-2")):
+            make_measured_artifact(artifact, run_id)
+            attach_experiment_contract(artifact)
+        return artifacts
+
+    def test_four_artifact_experiment_is_eligible_and_cli_writes_report(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = self.make_artifacts(root)
+            report_path = root / "report.json"
+            stdout = io.StringIO()
+            with patch.object(
+                sys,
+                "argv",
+                ["mark2.run", "qualify-experiment", *(str(path) for path in artifacts), "--output", str(report_path)],
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 0)
+            report = json.loads(stdout.getvalue())
+            self.assertEqual(report, json.loads(report_path.read_text(encoding="utf-8")))
+            self.assertTrue(report["eligible"])
+            self.assertEqual(report["mode"], "repository-measured-controlled-experiment-qualification")
+            self.assertEqual(set(report["pair_sources"]), {"baseline", "variant"})
+            self.assertTrue(
+                all({"name", "expected", "actual", "passed", "reason"} == set(check) for check in report["checks"])
+            )
+            self.assertNotIn("p_value", report)
+            self.assertNotIn("supported", report)
+
+    def test_experiment_qualification_rejects_contract_tampering_and_mismatch(self):
+        cases = ("copy_tamper", "different_contract", "copy_symlink")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                artifacts = self.make_artifacts(root)
+                target = artifacts[3]
+                contract_path = target / "experiment_contract.json"
+                if case == "copy_tamper":
+                    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+                    contract["hypothesis_id"] = "tampered"
+                    run.write_json(contract_path, contract)
+                elif case == "different_contract":
+                    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+                    contract["experiment_id"] = "different-experiment"
+                    attach_experiment_contract(target, contract)
+                else:
+                    outside = root / "outside.json"
+                    contract_path.rename(outside)
+                    contract_path.symlink_to(outside)
+                result = run.qualify_experiment_artifacts(*artifacts)
+                self.assertFalse(result["eligible"])
+                failed = {check["name"] for check in result["checks"] if not check["passed"]}
+                self.assertTrue(
+                    {"run4.experiment_contract_integrity", "experiment.same_experiment_contract"} & failed
+                )
+
+    def test_experiment_qualification_rejects_duplicate_run_sample_target_and_runtime(self):
+        cases = ("duplicate_run", "sample_target", "runtime")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                artifacts = self.make_artifacts(root)
+                target = artifacts[3]
+                manifest_path = target / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if case == "duplicate_run":
+                    manifest["run_id"] = "baseline-1"
+                elif case == "sample_target":
+                    rows = run._predictions(target / "predictions.jsonl")
+                    rows[0].update(target="B", prediction="B", correct=True, output_text="Answer: B")
+                    manifest["metrics"] = run.aggregate(rows)
+                    with (target / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                        for row in rows:
+                            handle.write(json.dumps(row) + "\n")
+                else:
+                    manifest["runtime"]["cuda"] = "12.9"
+                run.write_json(manifest_path, manifest)
+                result = run.qualify_experiment_artifacts(*artifacts)
+                self.assertFalse(result["eligible"])
+                failed = {check["name"] for check in result["checks"] if not check["passed"]}
+                expected = {
+                    "duplicate_run": "experiment.distinct_run_ids",
+                    "sample_target": "experiment.same_question_order_and_targets",
+                    "runtime": "experiment.same_runtime",
+                }[case]
+                self.assertIn(expected, failed)
+
+    def test_variant_prediction_rule_controls_pair_reproducibility(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = self.make_artifacts(root)
+            target = artifacts[3]
+            rows = run._predictions(target / "predictions.jsonl")
+            rows[0].update(prediction="B", correct=False, output_text="Answer: B")
+            with (target / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                for row in rows:
+                    handle.write(json.dumps(row) + "\n")
+            manifest_path = target / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["metrics"] = run.aggregate(rows)
+            run.write_json(manifest_path, manifest)
+
+            result = run.qualify_experiment_artifacts(*artifacts)
+            self.assertFalse(result["eligible"])
+            failed = {check["name"] for check in result["checks"] if not check["passed"]}
+            self.assertIn("variant.pair.identical_predictions", failed)
+
+            contract = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+            contract["decision_rule"]["require_identical_variant_predictions"] = False
+            for artifact in artifacts:
+                attach_experiment_contract(artifact, contract)
+            result = run.qualify_experiment_artifacts(*artifacts)
+            self.assertTrue(result["eligible"])
 
 
 class PreflightTests(unittest.TestCase):
