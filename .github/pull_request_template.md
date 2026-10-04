@@ -28,6 +28,13 @@ Closes #
 ## 影響範囲
 
 
+## 実ホスト反映
+
+- 反映要否: 不要 / 必要
+- 対象unit・設定:
+- merge後の操作:
+- restart・停止等の影響:
+
 ## Known limitations
 
 

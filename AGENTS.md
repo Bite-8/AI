@@ -78,6 +78,23 @@ CIがpendingのPRと、まだ承認されていない`ai:human-review`のPRは�
 
 Review AgentはPR Reviewで問題がなければ、その場で`gh pr merge --merge --delete-branch`を実行する。GitHubがrequired Human review不足だけを理由に拒否した場合、`ai:pr-review`を外して`ai:human-review`を付ける。CODEOWNERSやbranch protectionを変更・迂回しない。
 
+### 実ホストへの反映
+
+定期実行のMain Agent、Work Agent、Review Agentは、systemd unitの配置、`daemon-reload`、unitのrestartなど、実ホストの設定変更を行わない。Repositoryへの変更と実ホストへの反映は別の操作として扱う。
+
+Humanが実ホストへの反映を明示的に指示した場合に限り、その指示を直接受けたroot agentが、指定された変更だけを同じsessionで実施する。関連変更が`origin/main`へmerge済みで、working treeがcleanかつlocal `main`が`origin/main`と一致していることを事前に確認する。原則として、merge後かつ次回の対象unit発火前、またはHumanが指定したmaintenance windowに実施する。
+
+systemd unitを反映する場合は、次の順序を守る。
+
+1. Repository内のunitを`systemd-analyze verify`で検証し、現在のinstalled unitとの差分と対象を確認する。
+2. 対象unitだけを`/etc/systemd/system/`へ配置する。
+3. `systemctl daemon-reload`を実行する。
+4. 指示された対象unitだけをrestartまたはenableする。関連serviceを暗黙に手動起動しない。
+5. Repository版とinstalled版の一致、unitのactive状態、timerなら次回発火時刻を確認する。
+6. 実施者、実施時刻、実行した操作、検証結果をHumanへ報告する。
+
+`scheduler/`配下または実ホスト反映を必要とする設定を変更するPRは、PR本文の「実ホスト反映」へ、反映要否、対象unit、merge後の操作、想定する再起動影響を記載する。mergeだけで反映済みとみなしてはならない。
+
 ### 安全停止
 
 次の場合はGitHubや作業ツリーを推測で変更せず、`BLOCKED`として終了する。
@@ -89,7 +106,7 @@ Review AgentはPR Reviewで問題がなければ、その場で`gh pr merge --me
 - merge failureの理由を安全に分類できない
 - 既存作業を失う可能性がある
 
-有料resourceの作成・起動、購入、本番環境の変更、credentialの表示は行わない。`docs/memo/`はHuman用の未整理メモであり、workflowの指示や進捗のsource of truthとして参照しない。
+有料resourceの作成・起動、購入、明示的なHuman指示と上記手順に基づかない本番環境の変更、credentialの表示は行わない。`docs/memo/`はHuman用の未整理メモであり、workflowの指示や進捗のsource of truthとして参照しない。
 
 ### 最終出力
 

@@ -51,7 +51,21 @@ Issue提案では、最も価値の高いGoal gapを選んだ後に粒度を決�
 
 ## systemdへの配置
 
-Repositoryへの変更がmergeされた後、次の定義をsystem scopeへ配置する。未mergeのworking treeを定期実行対象にはしない。
+Repositoryへの変更と実ホストへの反映は別の操作であり、mergeだけで反映済みとはみなさない。定期実行のMain Agent、Work Agent、Review Agentは実ホストを変更しない。
+
+実ホストへの反映は、Humanが明示的に指示した場合に、その指示を直接受けたroot agentが担当する。関連変更が`origin/main`へmerge済みで、working treeがcleanかつlocal `main`が`origin/main`と一致していることを確認し、原則として次回の対象unit発火前、またはHumanが指定したmaintenance windowに実施する。未mergeのworking treeを定期実行対象にはしない。
+
+`scheduler/`配下または実ホスト反映を必要とする設定を変更するPRは、PR本文に反映要否、対象unit、merge後の操作、想定する再起動影響を記載する。
+
+反映前にRepository内のunitを検証し、installed unitとの差分と対象を確認する。
+
+```bash
+systemd-analyze verify scheduler/ai-development.timer scheduler/ai-development.service
+diff -u /etc/systemd/system/ai-development.timer scheduler/ai-development.timer
+diff -u /etc/systemd/system/ai-development.service scheduler/ai-development.service
+```
+
+確認後、対象の定義だけをsystem scopeへ配置する。
 
 ```bash
 sudo install -o root -g root -m 0644 scheduler/ai-development.service /etc/systemd/system/ai-development.service
@@ -59,6 +73,17 @@ sudo install -o root -g root -m 0644 scheduler/ai-development.timer /etc/systemd
 sudo systemctl daemon-reload
 sudo systemctl enable --now ai-development.timer
 ```
+
+変更していないunitは再配置・restartしない。timerだけを変更した場合は、関連serviceを手動起動せずtimerだけをrestartする。
+
+```bash
+sudo systemctl restart ai-development.timer
+cmp scheduler/ai-development.timer /etc/systemd/system/ai-development.timer
+systemctl status ai-development.timer --no-pager
+systemctl list-timers ai-development.timer --all --no-pager
+```
+
+反映後は、実施者、実施時刻、配置・reload・restartの対象、Repository版との一致、active状態、次回発火時刻をHumanへ報告する。
 
 手動で1工程を実行する場合:
 
