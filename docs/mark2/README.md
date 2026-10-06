@@ -98,7 +98,7 @@ python3 -m mark2.run run --backend mock --run-id experiment-bookkeeping \
 
 指定時、runnerはbackend開始前に検証済み本体、canonical JSONのSHA-256、入力copyのファイル名を`manifest.json`へ保存し、run directoryへ`experiment_contract.json`をcopyする。保存copyを読み直して同じcanonical hashを計算すれば、本体・宣言hash・copyの対応を再検証できる。不正なcontractはrun directory作成前にnon-zeroで拒否される。`--experiment-contract`を指定しない既存baseline runのartifact形式は変わらない。
 
-controlled experimentは「contract固定 → baseline 2 runとvariant 2 run → 4 artifactの適格性判定」の順に進める。4 runすべてで同じ`--experiment-contract`を指定し、結果取得後に次を実行する。
+controlled experimentは「contract固定 → baseline 2 runとvariant 2 run → 4 artifactの適格性判定 → paired統計・三値判定」の順に進める。4 runすべてで同じ`--experiment-contract`を指定し、結果取得後に次を実行する。
 
 ```bash
 python3 -m mark2.run qualify-experiment \
@@ -107,11 +107,23 @@ python3 -m mark2.run qualify-experiment \
   artifacts/mark2/variant-01 \
   artifacts/mark2/variant-02 \
   --output artifacts/mark2/experiment-qualification.json
+python3 -m mark2.run evaluate-experiment \
+  artifacts/mark2/baseline-01 \
+  artifacts/mark2/baseline-02 \
+  artifacts/mark2/variant-01 \
+  artifacts/mark2/variant-02 \
+  --output artifacts/mark2/experiment-evaluation.json
 ```
 
 位置引数はbaseline 2 run、variant 2 runの順である。`qualify-experiment`は各artifactに既存のrepository-measured検査を適用し、experiment contractの本体・canonical SHA-256・保存copy、全directory/run IDの一意性、各pair内のcommit/source/固定環境、variantの事前登録済み予測再現条件、pair間の評価contract・sample順・target・prompt/model/runtime条件を検査する。baselineとvariantのcommit/source差だけは許可し、`pair_sources`へ明示する。
 
-reportの`eligible`は統計処理へ渡せるartifact集合であることだけを表す。1 checkでも不合格ならexit code 1となり、統計へ進めない。paired統計、p-value・効果量、`supported` / `inconclusive` / `regressed`の仮説判定は未実装であり、このcommandはそれらを出力しない。
+qualification reportの`eligible`は統計処理へ渡せるartifact集合であることだけを表す。1 checkでも不合格ならexit code 1となり、統計へ進めない。
+
+`evaluate-experiment`も保存済みqualification reportを信用せず、指定された元artifactへ同じ適格性検査を毎回再実行する。不適格なら`qualification`に全checkを保持し、`comparisons`や`classification`を生成せずexit code 1となる。
+
+適格な場合はbaseline run 1対variant run 1、run 2対run 2を別々のpaired evidenceとして扱う。各比較にsample数、双方の正解数・accuracy・符号付き差、both correct、both incorrect、variant only correct、baseline only correct、discordant pair数と改善・悪化それぞれのone-sided exact binomial p-valueを記録する。2 runを独立sampleとしてpoolしない。discordant pairが0なら両p-valueは1である。
+
+最終`classification.result`はcontractの最小accuracy差と有意水準を両比較へ同じように適用する。両方が改善条件を満たす場合だけ`supported`、両方が悪化条件を満たす場合だけ`regressed`、方向・有意性・最小効果条件が一致しない場合を含む残りは`inconclusive`となる。適格な実験を規則どおり判定できた場合、3分類のどれでもexit code 0であり、非支持という科学的結果を実行障害とは扱わない。reportにはexperiment/hypothesis ID、contract hash、run ID、pair source、適用threshold、各比較値、classificationと理由が残る。
 
 実機hostの承認済み条件は [`mark2/configs/qwen35_9b_l4_profile.json`](../../mark2/configs/qwen35_9b_l4_profile.json) に固定する。Python 3.10以上、`mark2/requirements.txt`のexact pin、CUDA/BF16、NVIDIA L4 1基、22,500 MiB以上のVRAM、開始時100 GiB以上の空き容量を要求する。実行時には別途、承認対象となったrepository commitの完全なSHAを渡す。
 

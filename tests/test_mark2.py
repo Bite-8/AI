@@ -102,6 +102,25 @@ def attach_experiment_contract(path, contract=None):
     run.write_json(manifest_path, manifest)
 
 
+def set_artifact_correct_indices(path, correct_indices):
+    correct_indices = set(correct_indices)
+    rows = run._predictions(path / "predictions.jsonl")
+    for index, row in enumerate(rows):
+        correct = index in correct_indices
+        row.update(
+            prediction="A" if correct else "B",
+            correct=correct,
+            output_text="Answer: A" if correct else "Answer: B",
+        )
+    with (path / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+    manifest_path = path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["metrics"] = run.aggregate(rows)
+    run.write_json(manifest_path, manifest)
+
+
 class MeasuredBackend:
     name = "transformers"
 
@@ -1128,6 +1147,151 @@ class ExperimentQualificationTests(unittest.TestCase):
                 attach_experiment_contract(artifact, contract)
             result = run.qualify_experiment_artifacts(*artifacts)
             self.assertTrue(result["eligible"])
+
+
+class ExperimentEvaluationTests(unittest.TestCase):
+    def make_artifacts(self, root):
+        artifacts = tuple(root / name for name in ("baseline-1", "baseline-2", "variant-1", "variant-2"))
+        for artifact, run_id in zip(artifacts, ("baseline-1", "baseline-2", "variant-1", "variant-2")):
+            make_measured_artifact(artifact, run_id)
+            attach_experiment_contract(artifact)
+        return artifacts
+
+    def set_pair_results(self, artifacts, baseline_correct, variant_first_correct, variant_second_correct=None):
+        if variant_second_correct is None:
+            variant_second_correct = variant_first_correct
+        for artifact in artifacts[:2]:
+            set_artifact_correct_indices(artifact, baseline_correct)
+        set_artifact_correct_indices(artifacts[2], variant_first_correct)
+        set_artifact_correct_indices(artifacts[3], variant_second_correct)
+
+    def test_exact_binomial_tail_and_paired_counts_cover_known_edges(self):
+        self.assertEqual(run.exact_binomial_upper_tail(0, 0), 1.0)
+        self.assertEqual(run.exact_binomial_upper_tail(5, 5), 1 / 32)
+        self.assertEqual(run.exact_binomial_upper_tail(2, 4), 11 / 16)
+        baseline = [{"correct": value} for value in (True, True, False, False, False)]
+        variant = [{"correct": value} for value in (True, False, True, False, True)]
+        result = run._paired_accuracy_comparison(baseline, variant, "baseline", "variant")
+        self.assertEqual(result["sample_size"], 5)
+        self.assertEqual(result["both_correct"], 1)
+        self.assertEqual(result["both_incorrect"], 1)
+        self.assertEqual(result["variant_only_correct"], 2)
+        self.assertEqual(result["baseline_only_correct"], 1)
+        self.assertEqual(result["discordant_pairs"], 3)
+        self.assertEqual(result["accuracy_difference"], 0.2)
+        self.assertEqual(result["improvement_p_value"], 0.5)
+        self.assertEqual(result["regression_p_value"], 0.875)
+
+        edge_cases = {
+            "zero_discordant": ([True] * 5, [True] * 5, (0, 0, 1.0, 1.0)),
+            "all_improve": ([False] * 5, [True] * 5, (5, 0, 1 / 32, 1.0)),
+            "all_regress": ([True] * 5, [False] * 5, (0, 5, 1.0, 1 / 32)),
+            "equal_discordant": (
+                [True, True, False, False],
+                [False, False, True, True],
+                (2, 2, 11 / 16, 11 / 16),
+            ),
+        }
+        for name, (baseline_values, variant_values, expected) in edge_cases.items():
+            with self.subTest(name=name):
+                comparison = run._paired_accuracy_comparison(
+                    [{"correct": value} for value in baseline_values],
+                    [{"correct": value} for value in variant_values],
+                    "baseline",
+                    "variant",
+                )
+                self.assertEqual(
+                    (
+                        comparison["variant_only_correct"],
+                        comparison["baseline_only_correct"],
+                        comparison["improvement_p_value"],
+                        comparison["regression_p_value"],
+                    ),
+                    expected,
+                )
+
+    def test_three_classifications_and_boundary_thresholds(self):
+        cases = {
+            "supported": (range(50), range(51)),
+            "regressed": (range(51), range(50)),
+            "inconclusive": (range(50), range(50)),
+        }
+        for expected, (baseline_correct, variant_correct) in cases.items():
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as folder:
+                artifacts = self.make_artifacts(Path(folder))
+                contract = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+                contract["decision_rule"].update(
+                    minimum_accuracy_difference=0.01,
+                    significance_level=0.5,
+                )
+                for artifact in artifacts:
+                    attach_experiment_contract(artifact, contract)
+                self.set_pair_results(artifacts, baseline_correct, variant_correct)
+                report = run.evaluate_experiment_artifacts(*artifacts)
+                self.assertTrue(report["eligible"])
+                self.assertEqual(report["classification"]["result"], expected)
+                if expected != "inconclusive":
+                    comparison = report["comparisons"][0]
+                    self.assertEqual(abs(comparison["accuracy_difference"]), 0.01)
+                    expected_p = (
+                        comparison["improvement_p_value"]
+                        if expected == "supported"
+                        else comparison["regression_p_value"]
+                    )
+                    self.assertEqual(expected_p, 0.5)
+
+    def test_nonidentical_variant_runs_are_not_pooled(self):
+        with tempfile.TemporaryDirectory() as folder:
+            artifacts = self.make_artifacts(Path(folder))
+            contract = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+            contract["decision_rule"]["require_identical_variant_predictions"] = False
+            contract["decision_rule"]["significance_level"] = 0.05
+            for artifact in artifacts:
+                attach_experiment_contract(artifact, contract)
+            self.set_pair_results(artifacts, range(50), range(70), range(50))
+            report = run.evaluate_experiment_artifacts(*artifacts)
+            self.assertTrue(report["eligible"])
+            self.assertEqual(len(report["comparisons"]), 2)
+            self.assertEqual(report["classification"]["result"], "inconclusive")
+            self.assertEqual(report["classification"]["comparison_supports"], [True, False])
+
+    def test_cli_writes_traceable_report_and_only_ineligible_input_fails(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = self.make_artifacts(root)
+            self.set_pair_results(artifacts, range(50), range(70))
+            report_path = root / "evaluation.json"
+            stdout = io.StringIO()
+            with patch.object(
+                sys,
+                "argv",
+                ["mark2.run", "evaluate-experiment", *(str(path) for path in artifacts), "--output", str(report_path)],
+            ), patch.object(sys, "stdout", stdout):
+                self.assertEqual(run.main(), 0)
+            report = json.loads(stdout.getvalue())
+            self.assertEqual(report, json.loads(report_path.read_text(encoding="utf-8")))
+            self.assertEqual(report["classification"]["result"], "supported")
+            self.assertEqual(report["experiment_id"], "example-controlled-experiment-v1")
+            self.assertEqual(report["hypothesis_id"], "example-hypothesis-not-evaluated")
+            self.assertEqual(report["run_ids"], ["baseline-1", "baseline-2", "variant-1", "variant-2"])
+            self.assertEqual(set(report["pair_sources"]), {"baseline", "variant"})
+            self.assertEqual(len(report["experiment_contract_sha256"]), 64)
+
+            manifest_path = artifacts[3] / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["runtime"]["cuda"] = "12.9"
+            run.write_json(manifest_path, manifest)
+            ineligible = run.evaluate_experiment_artifacts(*artifacts)
+            self.assertFalse(ineligible["eligible"])
+            self.assertIn("qualification", ineligible)
+            self.assertNotIn("comparisons", ineligible)
+            self.assertNotIn("classification", ineligible)
+            with patch.object(
+                sys,
+                "argv",
+                ["mark2.run", "evaluate-experiment", *(str(path) for path in artifacts)],
+            ), patch.object(sys, "stdout", io.StringIO()):
+                self.assertEqual(run.main(), 1)
 
 
 class PreflightTests(unittest.TestCase):
