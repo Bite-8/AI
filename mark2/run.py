@@ -1275,6 +1275,138 @@ def qualify_experiment_artifacts(
     }
 
 
+def exact_binomial_upper_tail(successes: int, trials: int) -> float:
+    """Return P(X >= successes) for X ~ Binomial(trials, 0.5)."""
+    if trials < 0 or successes < 0 or successes > trials:
+        raise ValueError("successes and trials must satisfy 0 <= successes <= trials")
+    if trials == 0:
+        return 1.0
+    numerator = sum(math.comb(trials, value) for value in range(successes, trials + 1))
+    return numerator / (2**trials)
+
+
+def _paired_accuracy_comparison(
+    baseline_rows: list[dict[str, Any]],
+    variant_rows: list[dict[str, Any]],
+    baseline_run_id: str,
+    variant_run_id: str,
+) -> dict[str, Any]:
+    sample_size = len(baseline_rows)
+    if sample_size == 0 or len(variant_rows) != sample_size:
+        raise ValueError("qualified paired artifacts must contain the same non-empty sample")
+
+    both_correct = both_incorrect = variant_only = baseline_only = 0
+    for baseline, variant in zip(baseline_rows, variant_rows):
+        baseline_correct = baseline["correct"]
+        variant_correct = variant["correct"]
+        if baseline_correct and variant_correct:
+            both_correct += 1
+        elif not baseline_correct and not variant_correct:
+            both_incorrect += 1
+        elif variant_correct:
+            variant_only += 1
+        else:
+            baseline_only += 1
+
+    baseline_correct = both_correct + baseline_only
+    variant_correct = both_correct + variant_only
+    discordant = variant_only + baseline_only
+    return {
+        "baseline_run_id": baseline_run_id,
+        "variant_run_id": variant_run_id,
+        "sample_size": sample_size,
+        "baseline_correct": baseline_correct,
+        "variant_correct": variant_correct,
+        "baseline_accuracy": baseline_correct / sample_size,
+        "variant_accuracy": variant_correct / sample_size,
+        "accuracy_difference": (variant_correct - baseline_correct) / sample_size,
+        "both_correct": both_correct,
+        "both_incorrect": both_incorrect,
+        "variant_only_correct": variant_only,
+        "baseline_only_correct": baseline_only,
+        "discordant_pairs": discordant,
+        "improvement_p_value": exact_binomial_upper_tail(variant_only, discordant),
+        "regression_p_value": exact_binomial_upper_tail(baseline_only, discordant),
+    }
+
+
+def evaluate_experiment_artifacts(
+    baseline_first: Path,
+    baseline_second: Path,
+    variant_first: Path,
+    variant_second: Path,
+) -> dict[str, Any]:
+    """Qualify four artifacts, then apply the preregistered paired decision rule."""
+    paths = (baseline_first, baseline_second, variant_first, variant_second)
+    qualification = qualify_experiment_artifacts(*paths)
+    report: dict[str, Any] = {
+        "schema_version": 1,
+        "mode": "repository-measured-controlled-experiment-evaluation",
+        "eligible": qualification["eligible"],
+        "qualification": qualification,
+    }
+    if not qualification["eligible"]:
+        return report
+
+    manifests = [json.loads((path / "manifest.json").read_text(encoding="utf-8")) for path in paths]
+    predictions = [_predictions(path / "predictions.jsonl") for path in paths]
+    contract = manifests[0]["experiment_contract"]
+    rule = contract["decision_rule"]
+    comparisons = [
+        _paired_accuracy_comparison(
+            predictions[index],
+            predictions[index + 2],
+            manifests[index]["run_id"],
+            manifests[index + 2]["run_id"],
+        )
+        for index in range(2)
+    ]
+    minimum_difference = rule["minimum_accuracy_difference"]
+    significance_level = rule["significance_level"]
+    supports = [
+        item["accuracy_difference"] >= minimum_difference
+        and item["improvement_p_value"] <= significance_level
+        for item in comparisons
+    ]
+    regresses = [
+        item["accuracy_difference"] <= -minimum_difference
+        and item["regression_p_value"] <= significance_level
+        for item in comparisons
+    ]
+    if all(supports):
+        classification = "supported"
+        reason = "both paired comparisons meet the preregistered improvement effect and significance thresholds"
+    elif all(regresses):
+        classification = "regressed"
+        reason = "both paired comparisons meet the preregistered regression effect and significance thresholds"
+    else:
+        classification = "inconclusive"
+        reason = "the two paired comparisons do not both meet the same preregistered directional decision rule"
+
+    report.update(
+        experiment_id=contract["experiment_id"],
+        hypothesis_id=contract["hypothesis_id"],
+        experiment_contract_sha256=manifests[0]["experiment_contract_sha256"],
+        run_ids=qualification["run_ids"],
+        pair_sources=qualification["pair_sources"],
+        thresholds={
+            "metric": contract["primary_metric"]["name"],
+            "direction": contract["primary_metric"]["direction"],
+            "minimum_accuracy_difference": minimum_difference,
+            "significance_level": significance_level,
+            "paired_test": rule["paired_test"],
+        },
+        comparisons=comparisons,
+        classification={
+            "result": classification,
+            "reason": reason,
+            "comparison_supports": supports,
+            "comparison_regresses": regresses,
+        },
+    )
+    return report
+
+
 def compare_runs(first: Path, second: Path) -> dict[str, Any]:
     manifests = [json.loads((path / "manifest.json").read_text(encoding="utf-8")) for path in (first, second)]
     if any(item.get("status") != "completed" for item in manifests):
@@ -1339,6 +1471,15 @@ def build_parser() -> argparse.ArgumentParser:
     qualify_experiment.add_argument("variant_first", type=Path)
     qualify_experiment.add_argument("variant_second", type=Path)
     qualify_experiment.add_argument("--output", type=Path)
+    evaluate_experiment = commands.add_parser(
+        "evaluate-experiment",
+        help="qualify four artifacts and apply preregistered paired statistics",
+    )
+    evaluate_experiment.add_argument("baseline_first", type=Path)
+    evaluate_experiment.add_argument("baseline_second", type=Path)
+    evaluate_experiment.add_argument("variant_first", type=Path)
+    evaluate_experiment.add_argument("variant_second", type=Path)
+    evaluate_experiment.add_argument("--output", type=Path)
     return parser
 
 
@@ -1374,6 +1515,20 @@ def main() -> int:
             return 0 if result["eligible"] else 1
         if args.command == "qualify-experiment":
             result = qualify_experiment_artifacts(
+                args.baseline_first,
+                args.baseline_second,
+                args.variant_first,
+                args.variant_second,
+            )
+            payload = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                with args.output.open("x", encoding="utf-8") as handle:
+                    handle.write(payload)
+            print(payload, end="")
+            return 0 if result["eligible"] else 1
+        if args.command == "evaluate-experiment":
+            result = evaluate_experiment_artifacts(
                 args.baseline_first,
                 args.baseline_second,
                 args.variant_first,
