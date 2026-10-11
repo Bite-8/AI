@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "region": "ap-northeast-1",
+  "instance_id": "i-0fb8c2572680019af",
+  "timeouts": {
+    "start_seconds": 600,
+    "stop_seconds": 600,
+    "command_seconds": 900,
+    "poll_seconds": 5
+  },
+  "run_commands": {
+    "inventory": [
+      "cat /etc/os-release",
+      "uname -r",
+      "python3 --version",
+      "nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader",
+      "nvidia-smi",
+      "amazon-ssm-agent -version"
+    ]
+  }
+}

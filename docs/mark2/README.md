@@ -25,42 +25,32 @@
 
 weight容量は2026-09-13にpinned Hugging Face repository metadataから確認したtensor storageで、KV cache、activation、CUDA context等は含まない。provider公表benchmarkは条件がこのrepositoryのpilotと異なるため、能力帯の確認にだけ使う。
 
-## AWS東京リージョンでの実行計画と費用
+## 固定GPU instanceと運用境界
 
-初回実機runは、東京リージョン（`ap-northeast-1`）のEC2 Linux On-Demand `g6.2xlarge`で行う。東京リージョンの使用は2026-09-15にPR #31でHuman承認済みであり、料金調査だけでは確定できない事項ではない。Availability Zoneは起動直前にaccount上の提供状況を確認して決める。東京で条件を満たせない場合も別regionへ自動変更せず、停止して再承認を求める。
+Mark2はHumanが用意した既存GPU EC2を再利用する。機械可読なsource of truthは [`mark2/configs/gpu_instance.json`](../../mark2/configs/gpu_instance.json) であり、regionは`ap-northeast-1`、instance IDは`i-0fb8c2572680019af`に固定する。CLI引数や環境変数で別targetへ切り替えられない。target変更はconfigとvalidatorを更新するreview可能なRepository変更として行う。
 
-| 項目 | 提案 |
+2026-10-10にinstanceを起動せずread-only APIだけで確認したinventoryは次のとおり。credential、account ID、private network情報、volume IDは記録しない。
+
+| 項目 | 確認結果 |
 |---|---|
-| GPU | NVIDIA L4 x1、24 GB、MIGなし |
-| Host / local storage | 8 vCPU、32 GiB RAM、450 GB NVMe |
-| Root volume | 暗号化gp3 100 GB、削除時にinstanceとともに削除 |
-| 数値条件 | BF16、量子化なし、TF32なし、CPU/disk offloadなし |
-| On-Demand単価 | **$1.41781/hour**（2026-09-21 AWS Price List確認） |
-| 作業上限 | **4時間** |
-| AWS利用料概算 | **$5.74**（EC2、gp3、Public IPv4。税別） |
-| 承認済み上限 | **$10.00**（tax・為替手数料と端数の余裕を含む） |
+| EC2 state | `stopped` |
+| AMI ID | `ami-0018e78b14211afb1` |
+| instance type / architecture | `g6.2xlarge` / `x86_64` |
+| root device | `/dev/sda1`、EBS 1本、termination時削除=true |
+| AMI name | `ec2:DescribeImages`権限不足のため未検証 |
+| volume type / size / encryption | `ec2:DescribeVolumes`権限不足のため未検証 |
+| SSM登録・ping状態 | `ssm:DescribeInstanceInformation`権限不足のため未検証 |
+| guest OS / kernel / Python | stoppedのため未検証 |
+| NVIDIA driver / CUDA / GPU型・VRAM | stoppedのため未検証 |
+| SSM Agent version | stoppedかつSSM照会権限不足のため未検証 |
 
-使う課金resourceと内訳は次のとおり。月額は比較しやすいよう730時間連続利用で換算した値であり、実際に1か月動かす計画ではない。gp3の4時間額は730時間月として按分している。
+未検証項目を推測で固定しない。次にHumanが対象、利用目的、費用上限、終了時刻を明示して有料startを承認したsessionで、`run-command inventory`を実行する。その出力が[`qwen35_9b_l4_profile.json`](../../mark2/configs/qwen35_9b_l4_profile.json)と一致するか確認し、不一致ならmodel/datasetを取得せず停止する。AMI nameとvolume構成は必要なread-only権限が付与された後に再取得する。
 
-| 課金resource | 数量・単価 | 4時間上限の概算 | 730時間の月額換算 |
-|---|---:|---:|---:|
-| EC2 `g6.2xlarge` Linux On-Demand | 1台、$1.41781/hour | $5.67 | $1,035.00 |
-| EBS gp3 root volume | 100 GB、$0.096/GB-month、baseline 3,000 IOPS / 125 MB/s | $0.05 | $9.60 |
-| Public IPv4 | 1 address、$0.005/hour | $0.02 | $3.65 |
-| Instance store NVMe | 450 GB、instance料金に含む | $0.00 | $0.00 |
-| Internet data transfer | model downloadは受信のため$0。artifact送信はaccount全体の月間100 GB無料枠内を想定 | $0.00見込み | 利用量とaccount全体の使用状況による |
-| **合計** |  | **$5.74** | **$1,048.25 + 無料枠超過分** |
+Repository機能が許可する操作は固定targetの`status`、通常の`start`/`stop`、allowlist済みSSM Run Command、SSM Session Managerだけである。新規resource作成、terminate、reboot、強制stop、構成・権限変更、SSH fallbackは実装しない。各actionはEC2とSSMから返ったinstance IDを固定値と照合し、0件、複数件、ID不一致、terminated、不明・遷移中state、SSM未登録・offline、権限エラー、timeoutでfail closedする。別instance、別region、別接続方式へfallbackしない。
 
-日本の消費税10%が全額にかかる単純な保守計算でも4時間は約$6.32で、承認済み$10上限内である。実際の請求はbilling address、為替、account全体の無料枠使用状況に依存する。NAT Gateway、Load Balancer、EBS snapshot、Elastic IP、追加EBS、長期保存用S3は使用しない。VPC、Security Group、Internet Gateway、IAMにはこの最小構成で追加時間料金を見込まない。
+`start`は課金を開始する。Humanが利用目的と時間上限を明示した後に限り、固定instance IDをconfirmationとして指定する。作業者はsession終了時に`stop`を実行し、続けて`status`で`stopped`を確認する責任を持つ。自動化やAI workflowはHumanの明示承認なしにstartしない。単価や上限は変わり得るため、過去の見積りを承認として流用しない。
 
-単価は変わり得るため、起動直前にAWS accountで東京リージョンの実単価、利用可能AZ、G-family quotaを検索し、PRに提示する。現在の実行roleではAZとquotaを参照する権限がないため、この2点は未確認である。見積もりが$10を超える場合は起動せず、再承認を求める。初回は中断による環境差を避けるためSpotを使わない。
-
-PR #31では次の二段階が承認済みである。
-
-1. `Qwen/Qwen3.5-9B`をprimary baselineとして採用する
-2. 東京リージョン、4時間/$10上限、停止条件に従って有料実行する
-
-有料resourceはまだ作成していない。起動前に、未確認の実単価・AZ・quotaと実行担当者をPRへ記録し、承認済み条件をすべて満たすことを確認する。
+必要な実行権限は固定targetに対するEC2状態参照・start・通常stopと、SSM managed-instance参照・Run Command・Session Managerである。AWS CLIとSession Manager pluginが利用可能でなければ停止する。SSH用inbound ruleや永続keyは不要である。
 
 ## 固定する評価条件
 
@@ -129,18 +119,36 @@ qualification reportの`eligible`は統計処理へ渡せるartifact集合であ
 
 ## 実行方法
 
-無料の事前検査:
+Repositoryと固定target configの無料の事前検査:
 
 ```bash
 python3 -m mark2.run check-config
 python3 -m mark2.run check-experiment-contract
+python3 -m mark2.instance --help
 python3 -m unittest discover -s tests -v
 python3 -m mark2.run run --backend mock --run-id mock-1
 python3 -m mark2.run run --backend mock --run-id mock-2
 python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 ```
 
-Humanによる二段階の承認後、Python 3.10以上の隔離環境と `mark2/requirements.txt` の固定依存を使う。承認されたcommit SHAを記録し、modelまたはdatasetを取得する前にhost preflightを実行する。
+`status`はread-onlyだが、EC2とSSMの両方を検証できなければnon-zeroになる。
+
+```bash
+python3 -m mark2.instance status
+```
+
+Humanが対象、目的、時間・費用上限を明示してstartを承認した後だけ、次を実行する。confirmationは課金開始の誤操作を防ぐため固定instance IDと完全一致させる。`start`はEC2がrunningかつSSM Onlineになるまで最大10分だけ待つ。
+
+```bash
+python3 -m mark2.instance start \
+  --confirm-start i-0fb8c2572680019af
+python3 -m mark2.instance run-command inventory
+python3 -m mark2.instance session
+```
+
+Run CommandはRepositoryに固定された`inventory`だけを受け付け、任意shell文字列をCLI引数から組み立てない。command ID、最終status、stdout、stderrを表示し、失敗または15分timeoutでnon-zeroになる。session開始失敗時もSSHへfallbackしない。
+
+inventoryが承認済みprofileと一致した後、Python 3.10以上の隔離環境と `mark2/requirements.txt` の固定依存を使う。承認されたcommit SHAを記録し、modelまたはdatasetを取得する前にhost preflightを実行する。
 
 ```bash
 EXPECTED_COMMIT=<承認された40文字のcommit SHA>
@@ -172,21 +180,31 @@ python3 -m mark2.run qualify \
 
 `baseline-qualification.json`の`eligible`がtrueであることを確認し、実機runのartifact path、commit、accuracy、同JSONをIssue #30へ記録する。falseの場合は不合格checkの`reason`を記録して停止し、artifactをbaselineとして採用しない。
 
-次の場合は条件を変更せず停止し、logとartifactを退避してinstanceとEBSを削除する。
+次の場合は条件を変更せず実験を中止し、logとartifactを回収して通常stopする。
 
 - 承認したregion/AZ、GPU、単価、構成と異なる
 - revision、依存、実行commitが固定値と異なる
 - CUDA/BF16が使えない、単一L4に収まらない、offloadまたはOOMが発生する
-- local NVMe空きが開始時100 GB未満、download後50 GB未満
+- disk空きが開始時100 GB未満、download後50 GB未満
 - unit test、mock比較、1回目runが失敗する
-- 各準備phase 45分、各baseline run 45分、全工程4時間、または総額$10の超過が見込まれる
+- Humanが承認した時間または費用上限の超過が見込まれる
 
-終了時はartifactを退避し、instance、EBS、snapshot、Elastic IP等の残存を確認して不要resourceを削除する。実時間、概算額、resource ID、削除時刻をPRへ記録する。
+artifactはguest上の`artifacts/mark2/`でmanifestとhashを確認し、SSM session経由の承認済み転送方法で開発hostへ回収する。回収後に双方で`sha256sum`を計算し、一致を確認してからguest側copyの扱いを決める。command文字列へcredentialやsecretを含めず、stdout/stderrにも保存しない。
+
+終了時は必ず次を実行する。`stop`は通常停止だけを要求して最大10分待つ。`status`で`stopped`を確認できなければ、別操作で回復を試みずHumanへtargetと失敗段階を報告する。
+
+```bash
+python3 -m mark2.instance stop
+python3 -m mark2.instance status
+```
+
+実時間、概算額、run ID、artifact hash、停止確認時刻を対象Issue/PRへ記録する。instanceやEBSは削除せず、次の承認済みsessionまでstoppedで維持する。
 
 ## 現在の結果
 
 - 設定検査・mock実行・artifact分離・失敗記録・再現比較: 自動テスト済み
 - Qwen3.5-9Bのprimary baseline採用: **Human承認済み**（PR #31）
+- 固定GPU EC2のread-only inventory: **一部確認済み**（権限不足項目とguest情報は未検証）
 - Qwen3.5-9B実機run: **未実行**
 - L4 24 GBでのload、所要時間、peak memory、独立2 runの一致: **未検証**
 
