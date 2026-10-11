@@ -33,8 +33,20 @@ AI workflowの状態は次のGitHub labelだけで機械判定する。コメン
 - `ai:changes-requested`: IssueまたはPRがWork Agentの修正待ち
 - `ai:pr-review`: PR Review待ち
 - `ai:human-review`: GitHubがHuman reviewを要求しておりmerge待ち
+- `ai:human-action-required`: 具体的な依頼を投稿済みでHuman対応待ち
+- `ai:human-action-ready`: Human対応完了の通知後、Work Agentによる検証待ち
+- `ai:human-action-cancelled`: Humanが依頼を撤回し、自動再開しない
 
 1つのIssueまたはPRに複数のAI状態labelがある場合は推測で修正せず、`BLOCKED`として終了する。
+
+Human Escalation中は、直前の状態をコメントから推測せず、次のresume metadata labelを正確に1つ保持する。resume labelはAI状態labelではない。
+
+- `ai:resume-issue-review`
+- `ai:resume-issue-approved`
+- `ai:resume-changes-requested`
+- `ai:resume-pr-review`
+
+Human Escalation状態でresume labelが欠落または複数ある場合、対象種別と復帰先が矛盾する場合、通常状態にresume labelが残っている場合も、推測で変更せず`BLOCKED`として終了する。`ai:human-review`はGitHub required Human review専用であり、Human Escalationには使わない。
 
 `priority:urgent`はAI状態labelではなく、Humanが通常queueへの割り込みを指示する優先度labelとする。Agentは自らこのlabelを新規付与してはならない。urgentなIssueからPRを作る場合に限り、その優先度をPRへ引き継ぐ。urgentであってもIssue Review、CI、PR Review、安全停止条件は省略しない。
 
@@ -55,15 +67,16 @@ Work AgentがIssueを提案する際は、まず`GOAL.md`とRepositoryの差分�
 最初に、`priority:urgent`と有効なAI状態labelの両方を持つopen対象だけを候補として、次の優先順位で最も古い1件を選ぶ。urgent候補に実行可能な対象がなければ、`priority:urgent`の有無にかかわらず同じ優先順位を通常queueへ適用する。
 
 1. `ai:human-review`のPRが現在merge可能なら、Main Agentがmerge commit方式でmergeし、remote branchを削除する
-2. PRの`ai:changes-requested` → `work`
-3. `ai:pr-review`でCIが失敗 → `work`
-4. `ai:pr-review`でCIが成功、またはrequired checkがない → `review`
-5. Issueの`ai:issue-approved` → `work`
-6. Issueの`ai:changes-requested` → `work`
-7. Issueの`ai:issue-review` → `review`
-8. 実行可能な対象がない → `work`にIssueを1件提案させる
+2. IssueまたはPRの`ai:human-action-ready` → `work`の`verify_escalation`
+3. PRの`ai:changes-requested` → `work`
+4. `ai:pr-review`でCIが失敗 → `work`
+5. `ai:pr-review`でCIが成功、またはrequired checkがない → `review`
+6. Issueの`ai:issue-approved` → `work`
+7. Issueの`ai:changes-requested` → `work`
+8. Issueの`ai:issue-review` → `review`
+9. 実行可能な対象がない → `work`にIssueを1件提案させる
 
-CIがpendingのPRと、まだ承認されていない`ai:human-review`のPRはその回の実行対象から外し、他の実行可能な対象を探す。
+CIがpendingのPR、まだ承認されていない`ai:human-review`のPR、`ai:human-action-required`または`ai:human-action-cancelled`の対象はその回の実行対象から外し、他の実行可能な対象を探す。
 
 `priority:urgent`だけを持ちAI状態labelがない対象はroutingしない。タイトルの`[Hot]`等の文字列やauthor種別は優先度判定に使わない。
 
@@ -73,6 +86,19 @@ CIがpendingのPRと、まだ承認されていない`ai:human-review`のPRは�
 - `review`にはreview種別、対象番号、URL、期待する現在labelを明示する。
 - Subagentの思考過程を代行・補完せず、返却結果を受け取って終了する。
 - Work/Review自身に追加Subagentをspawnさせない。
+
+### Human Escalation
+
+Work AgentまたはReview Agentが現在のactionを安全に継続できない1件のHuman blockerを一次情報から確認した場合、同じ依頼を反復せず、次の契約で保留する。
+
+1. blockerの観測事実、失敗した操作とsecretを除くエラー種別、Humanに求める具体的な操作または判断、必要最小scope、費用・security・運用・停止責任への影響、Agentが安全上実行しなかった操作、対応後の検証手順と成功条件、復元する状態を1件のコメントに記載する。
+2. label変更直前に現在のactive状態を再確認し、それを対応するresume labelと`ai:human-action-required`へ置き換える。`priority:urgent`は変更しない。`ai:human-review`からはこの遷移を行わない。
+3. Humanは実施内容または判断と依頼scopeとの差異をコメントし、`ai:human-action-required`を`ai:human-action-ready`へ置き換える。コメントだけでは再開しない。credential、token、secret、不要なaccount ID、network詳細、機密性のある出力は記録しない。
+4. Main Agentは`ai:human-action-ready`をWork Agentの`verify_escalation`へrouteする。Work Agentはread-onlyまたは依頼コメントに対してHumanが明示承認した範囲だけを1回検証する。
+5. 成功時はready状態とresume labelを除去して元のactive状態を復元する。失敗時は事実と次に必要な対応をコメントし、`ai:human-action-required`へ戻してresume labelを保持する。
+6. Humanが撤回する場合は理由または結果をコメントし、required/ready状態を`ai:human-action-cancelled`へ置き換える。resume labelは保持するが、明示的なHuman指示なしに復帰しない。
+
+エスカレーションの投稿やHumanの対応通知自体を承認または検証成功とみなさない。曖昧なHuman入力、実行直前のlabel変更、検証不能、依頼scopeを超える操作が必要な場合はfail closedとする。
 
 ### Merge
 
@@ -102,6 +128,7 @@ systemd unitを反映する場合は、次の順序を守る。
 - working treeがcleanでない、または安全に`origin/main`へ同期できない
 - GitHub/Codex認証または必要な権限がない
 - AI状態labelが矛盾している
+- Human Escalationのresume labelが欠落、複数、対象種別と矛盾、または通常状態に残存している
 - 対象labelがSubagent実行直前に変わった
 - merge failureの理由を安全に分類できない
 - 既存作業を失う可能性がある

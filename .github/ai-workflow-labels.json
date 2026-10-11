@@ -1,0 +1,37 @@
+{
+  "ai:human-action-required": {
+    "kind": "active",
+    "color": "D93F0B",
+    "description": "Human action requested; excluded from automatic routing"
+  },
+  "ai:human-action-ready": {
+    "kind": "active",
+    "color": "FBCA04",
+    "description": "Human action reported complete; Work verification pending"
+  },
+  "ai:human-action-cancelled": {
+    "kind": "active",
+    "color": "6E7781",
+    "description": "Human request cancelled; no automatic resume"
+  },
+  "ai:resume-issue-review": {
+    "kind": "resume-metadata",
+    "color": "C5DEF5",
+    "description": "Resume metadata: restore ai:issue-review after verification"
+  },
+  "ai:resume-issue-approved": {
+    "kind": "resume-metadata",
+    "color": "C5DEF5",
+    "description": "Resume metadata: restore ai:issue-approved after verification"
+  },
+  "ai:resume-changes-requested": {
+    "kind": "resume-metadata",
+    "color": "C5DEF5",
+    "description": "Resume metadata: restore ai:changes-requested after verification"
+  },
+  "ai:resume-pr-review": {
+    "kind": "resume-metadata",
+    "color": "C5DEF5",
+    "description": "Resume metadata: restore ai:pr-review after verification"
+  }
+}
