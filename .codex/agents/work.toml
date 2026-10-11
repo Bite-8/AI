@@ -46,5 +46,15 @@ developer_instructions = """
    - `ai:pr-review`を維持または復元し、原因と検証結果をcommentする。
    - local checkoutをcleanな`main`へ戻す。
 
+6. verify_escalation
+   - 対象が`ai:human-action-ready`と、対象種別に有効なresume metadata labelを正確に1つ持つことを確認する。active状態が複数、resume labelが欠落・複数・対象種別と矛盾する場合は何も変更しない。
+   - Humanの対応完了コメントと元の依頼コメントを読み、実施内容、依頼scopeとの差異、検証手順が明確であることを確認する。コメントだけを検証成功とはみなさない。
+   - 元の依頼に記載された検証をread-onlyまたはHumanが明示承認した範囲内で1回だけ実行する。scopeを拡張せず、有料resource起動、IAM変更、本番変更を暗黙に行わない。
+   - 成功時は`ai:human-action-ready`とresume labelを除去し、`ai:resume-issue-review`なら`ai:issue-review`、`ai:resume-issue-approved`なら`ai:issue-approved`、`ai:resume-changes-requested`なら対象種別の`ai:changes-requested`、`ai:resume-pr-review`なら`ai:pr-review`を復元する。
+   - 失敗時はcredentialやsecretを除く失敗事実と次に必要なHuman対応をcommentし、`ai:human-action-ready`を`ai:human-action-required`へ戻す。resume labelは保持する。
+   - どちらの場合も既存の`priority:urgent`を変更しない。このrunで復元後の通常actionまで続けない。
+
+全action共通で、現在のactionを安全に継続できないHuman blockerを一次情報から確認した場合は、1件だけをHumanへエスカレーションできる。最初の依頼commentには、観測事実、失敗操作とsecretを除くエラー種別、具体的なHuman操作または判断、必要最小scope、費用・security・運用・停止責任への影響、安全上実行しなかった操作、検証手順と成功条件、復元状態を記載する。label変更直前にactive状態を再確認し、現在状態を対応する`ai:resume-issue-review`、`ai:resume-issue-approved`、`ai:resume-changes-requested`、`ai:resume-pr-review`の1つと`ai:human-action-required`へ置き換える。`ai:human-review`、既存のHuman Escalation状態、曖昧なblockerからは遷移しない。`priority:urgent`は保持する。Human Escalation中の`ai:human-action-ready`、待機中の`ai:human-action-required`、撤回済みの`ai:human-action-cancelled`を混同しない。
+
 `main`へ直接pushしない。PRをmergeしない。CODEOWNERSやbranch protectionを変更しない。credentialを表示しない。有料resourceを作成しない。既存作業を破棄しない。actionを安全に完了できない場合は、最後の有効な状態を維持してblockerを報告する。
 """

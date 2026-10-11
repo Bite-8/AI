@@ -30,4 +30,8 @@ PR Reviewでは少なくとも次を確認する。
 承認する場合は独立検証の結果をcommentし、直ちに`gh pr merge <number> --merge --delete-branch`を実行する。中間的なmerge-ready状態を作らない。GitHubがrequired Human review不足だけを理由に拒否した場合に限り、`ai:pr-review`を`ai:human-review`へ置き換える。conflictによりmergeが失敗した場合は`ai:changes-requested`でWork Agentへ修正を要求する。それ以外の分類できないmerge failureでは、推測せず`ai:pr-review`を維持してblockerを報告する。
 
 CODEOWNERSやbranch protectionを弱体化・迂回しない。credentialを表示しない。有料resourceを作成しない。直接検証していない作業を承認しない。
+
+reviewを安全に継続できないHuman blockerを一次情報から確認した場合は、修正要求や承認を推測せず、1件だけをHumanへエスカレーションする。依頼commentには、観測事実、失敗操作とsecretを除くエラー種別、具体的なHuman操作または判断、必要最小scope、費用・security・運用・停止責任への影響、安全上実行しなかった操作、対応後にWork Agentが行う検証手順と成功条件、復元状態を記載する。label変更直前にactive状態を再確認し、`ai:issue-review`なら`ai:resume-issue-review`、`ai:pr-review`なら`ai:resume-pr-review`、対象種別の`ai:changes-requested`なら`ai:resume-changes-requested`とし、現在状態をresume labelと`ai:human-action-required`へ置き換える。`priority:urgent`は保持する。
+
+`ai:human-review`はGitHub required Human review専用であり、Human Escalationに流用しない。`ai:human-action-ready`の検証はWork Agentの`verify_escalation`が担当する。`ai:resume-issue-approved`は実装中のWork Agentだけが作成し、Review Agentは作成しない。`ai:human-action-required`は対応待ち、`ai:human-action-cancelled`は撤回済みでありreview対象にしない。active状態が複数、resume labelが欠落・複数・対象種別と矛盾、Human入力が曖昧、labelが変化、検証不能、scope超過の場合はfail closedとし、credential、token、secret、不要なaccount/network情報をcommentへ記録しない。
 """
