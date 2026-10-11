@@ -143,6 +143,42 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(instance.InstanceError, "status Failed and response code 1"):
             instance.InstanceController(config(), backend).run_command("inventory")
 
+    def test_run_command_retries_eventual_consistency(self):
+        backend = FakeBackend()
+        original_command_result = backend.command_result
+        attempts = 0
+
+        def command_result(instance_id, command_id):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise instance.CommandInvocationNotReady("not visible yet")
+            return original_command_result(instance_id, command_id)
+
+        backend.command_result = command_result
+        sleeps = []
+        result = instance.InstanceController(config(), backend, sleep=sleeps.append).run_command("inventory")
+        self.assertEqual(result["status"], "Success")
+        self.assertEqual(attempts, 2)
+        self.assertEqual(sleeps, [config()["timeouts"]["poll_seconds"]])
+
+    def test_run_command_eventual_consistency_respects_timeout(self):
+        value = deepcopy(config())
+        value["timeouts"].update(command_seconds=1, poll_seconds=1)
+        backend = FakeBackend()
+        backend.command_result = lambda unused_instance_id, unused_command_id: (_ for _ in ()).throw(
+            instance.CommandInvocationNotReady("not visible yet")
+        )
+        ticks = iter((0, 0, 1))
+        controller = instance.InstanceController(
+            value,
+            backend,
+            monotonic=lambda: next(ticks),
+            sleep=lambda unused: None,
+        )
+        with self.assertRaisesRegex(instance.InstanceError, "timed out after 1 seconds"):
+            controller.run_command("inventory")
+
     def test_session_requires_running_online_target(self):
         backend = FakeBackend()
         instance.InstanceController(config(), backend).session()
@@ -180,6 +216,23 @@ class AwsCliBackendTests(unittest.TestCase):
         parameter = args[args.index("--parameters") + 1]
         self.assertEqual(json.loads(parameter), {"commands": ["uname -r", "python3 --version"]})
         self.assertNotIn("shell", kwargs)
+
+    def test_command_result_classifies_eventual_consistency_only(self):
+        errors = (
+            ("InvocationDoesNotExist", instance.CommandInvocationNotReady),
+            ("AccessDeniedException", instance.InstanceError),
+        )
+        for code, expected_error in errors:
+            with self.subTest(code=code):
+                def runner(args, **kwargs):
+                    detail = f"An error occurred ({code}) when calling the GetCommandInvocation operation"
+                    return subprocess.CompletedProcess(args, 255, "", detail)
+
+                backend = instance.AwsCliBackend("ap-northeast-1", "i-fixed", runner=runner)
+                with self.assertRaises(expected_error) as raised:
+                    backend.command_result("i-fixed", "command-1")
+                if code != "InvocationDoesNotExist":
+                    self.assertNotIsInstance(raised.exception, instance.CommandInvocationNotReady)
 
     def test_permission_error_is_sanitized(self):
         def runner(args, **kwargs):

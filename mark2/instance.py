@@ -22,6 +22,10 @@ class InstanceError(RuntimeError):
     """A safe, user-facing failure that must stop the requested operation."""
 
 
+class CommandInvocationNotReady(InstanceError):
+    """The newly sent SSM command is not visible to GetCommandInvocation yet."""
+
+
 def _exact_keys(value: Any, expected: set[str], label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != expected:
         raise ValueError(f"{label} must contain exactly: {', '.join(sorted(expected))}")
@@ -104,7 +108,13 @@ class AwsCliBackend:
             detail = _redact(getattr(result, "stderr", "") or "")
             if len(detail) > 500:
                 detail = detail[:500] + "..."
-            raise InstanceError(
+            error_type = (
+                CommandInvocationNotReady
+                if service_args[:2] == ["ssm", "get-command-invocation"]
+                and re.search(r"\bInvocationDoesNotExist\b", detail)
+                else InstanceError
+            )
+            raise error_type(
                 f"AWS CLI failed during {service_args[0]} {service_args[1]} for fixed target {self.instance_id}"
                 + (f": {detail}" if detail else "")
             )
@@ -313,7 +323,13 @@ class InstanceController:
         command_id = self.backend.send_command(self.instance_id, list(commands), timeout)
         deadline = self.monotonic() + timeout
         while True:
-            result = self.backend.command_result(self.instance_id, command_id)
+            try:
+                result = self.backend.command_result(self.instance_id, command_id)
+            except CommandInvocationNotReady:
+                if self.monotonic() >= deadline:
+                    raise InstanceError(f"SSM Run Command {command_id} timed out after {timeout} seconds")
+                self.sleep(self.config["timeouts"]["poll_seconds"])
+                continue
             status = result.get("status")
             if status in TERMINAL_COMMAND_STATES:
                 if status != "Success" or result.get("response_code") != 0:
