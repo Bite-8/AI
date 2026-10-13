@@ -229,6 +229,44 @@ class ExperimentContractTests(unittest.TestCase):
         self.assertEqual(self.contract["primary_metric"]["name"], "exact_match_accuracy")
         self.assertIn("not-evaluated", self.contract["hypothesis_id"])
 
+    def test_preregistered_predictive_error_contract_matches_decision_record(self):
+        contract_path = (
+            run.PACKAGE_DIR / "configs" / "predictive_error_extrapolation_v1.json"
+        )
+        decision_path = (
+            run.REPOSITORY_ROOT / "docs" / "mark2" / "predictive_error_extrapolation_v1.md"
+        )
+        contract = read_experiment_contract(contract_path)
+        decision = decision_path.read_text(encoding="utf-8")
+
+        fields = {
+            "experiment_id": contract["experiment_id"],
+            "hypothesis_id": contract["hypothesis_id"],
+            "independent_variable.id": contract["independent_variable"]["id"],
+            "primary_metric.name": contract["primary_metric"]["name"],
+            "primary_metric.direction": contract["primary_metric"]["direction"],
+            "decision_rule.minimum_accuracy_difference": str(
+                contract["decision_rule"]["minimum_accuracy_difference"]
+            ),
+            "decision_rule.significance_level": str(
+                contract["decision_rule"]["significance_level"]
+            ),
+            "decision_rule.paired_test": contract["decision_rule"]["paired_test"],
+            "decision_rule.require_identical_variant_predictions": str(
+                contract["decision_rule"]["require_identical_variant_predictions"]
+            ).lower(),
+        }
+        for field, value in fields.items():
+            with self.subTest(field=field):
+                self.assertIn(f"| `{field}` | `{value}` |", decision)
+
+        self.assertNotIn("example", contract["experiment_id"])
+        self.assertNotIn("placeholder", contract["independent_variable"]["description"].lower())
+        self.assertEqual(
+            contract["independent_variable"]["id"],
+            "final-layer-prediction-error-extrapolation-beta-0.10",
+        )
+
     def test_exact_keys_are_required_at_every_level(self):
         cases = []
         for path, key in (
