@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "experiment_id": "predictive-error-extrapolation-qwen35-9b-mmlu-v1",
+  "hypothesis_id": "predictive-error-extrapolation-improves-mmlu-v1",
+  "independent_variable": {
+    "id": "final-layer-prediction-error-extrapolation-beta-0.10",
+    "description": "Enable the preregistered final-layer hidden-state extrapolation h32' = h32 + 0.10 * (h32 - h31); baseline uses the unmodified h32 tensor."
+  },
+  "primary_metric": {
+    "name": "exact_match_accuracy",
+    "direction": "increase"
+  },
+  "decision_rule": {
+    "minimum_accuracy_difference": 0.05,
+    "significance_level": 0.05,
+    "paired_test": "exact-binomial-discordant-one-sided",
+    "require_identical_variant_predictions": true
+  }
+}

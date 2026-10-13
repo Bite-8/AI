@@ -70,6 +70,8 @@ Repository機能が許可する操作は固定targetの`status`、通常の`star
 
 variantを実行する前に、baseline評価契約とは別のcontrolled experiment contractを作成する。形式例は [`mark2/configs/experiment_contract_example.json`](../../mark2/configs/experiment_contract_example.json) である。この例はvalidatorとartifact記録の確認専用であり、実際の脳科学的仮説、variant結果、仮説支持を表さない。
 
+最初に検証する仮説は、予測符号化の誤差方向への表現更新を限定的に写像した[`Predictive-error extrapolation hypothesis v1`](predictive_error_extrapolation_v1.md)として事前登録済みである。実験用contractは[`predictive_error_extrapolation_v1.json`](../../mark2/configs/predictive_error_extrapolation_v1.json)を使う。decision recordが固定する介入境界、単一独立変数、resource上限、fail-closed条件に従うvariant実装は後続作業であり、この事前登録自体には含まれない。
+
 contractは次を結果取得前に固定する。
 
 - `experiment_id`と`hypothesis_id`: 1〜80文字の安定した識別子
@@ -88,7 +90,7 @@ python3 -m mark2.run run --backend mock --run-id experiment-bookkeeping \
 
 指定時、runnerはbackend開始前に検証済み本体、canonical JSONのSHA-256、入力copyのファイル名を`manifest.json`へ保存し、run directoryへ`experiment_contract.json`をcopyする。保存copyを読み直して同じcanonical hashを計算すれば、本体・宣言hash・copyの対応を再検証できる。不正なcontractはrun directory作成前にnon-zeroで拒否される。`--experiment-contract`を指定しない既存baseline runのartifact形式は変わらない。
 
-controlled experimentは「contract固定 → baseline 2 runとvariant 2 run → 4 artifactの適格性判定 → paired統計・三値判定」の順に進める。4 runすべてで同じ`--experiment-contract`を指定し、結果取得後に次を実行する。
+controlled experimentは「Issue #30のbaseline適格性確認 → 承認済み仮説に従うvariant実装 → baseline 2 runとvariant 2 run → 4 artifactの適格性判定 → paired統計・三値判定」の順に進める。実機baselineが適格と確認される前にvariant実装・実験へ進まない。4 runすべてで同じ実験用`--experiment-contract`を指定し、結果取得後に次を実行する。
 
 ```bash
 python3 -m mark2.run qualify-experiment \
