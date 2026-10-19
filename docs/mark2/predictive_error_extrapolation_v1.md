@@ -67,6 +67,7 @@ The machine-readable source is [`predictive_error_extrapolation_v1.json`](../../
 
 | contract field | preregistered value |
 |---|---|
+| `schema_version` | `2` |
 | `experiment_id` | `predictive-error-extrapolation-qwen35-9b-mmlu-v1` |
 | `hypothesis_id` | `predictive-error-extrapolation-improves-mmlu-v1` |
 | `independent_variable.id` | `final-layer-prediction-error-extrapolation-beta-0.10` |
@@ -76,6 +77,8 @@ The machine-readable source is [`predictive_error_extrapolation_v1.json`](../../
 | `decision_rule.significance_level` | `0.05` |
 | `decision_rule.paired_test` | `exact-binomial-discordant-one-sided` |
 | `decision_rule.require_identical_variant_predictions` | `true` |
+| `resource_budget.maximum_additional_peak_allocated_bytes` | `134217728` |
+| `resource_budget.maximum_variant_generation_time_ratio` | `1.1` |
 
 The minimum effect is fixed at five correct answers out of 100 (5 percentage points), rather than treating the benchmark's 1-point resolution as meaningful improvement. Alpha is fixed at 0.05. The effect threshold and exact paired significance gate are both required independently: for example, five variant-only discordances and no baseline-only discordance yield one-sided `p = 1/32 = 0.03125`, while a 5-point net gain with more mixed discordances can remain inconclusive. Each of the two paired comparisons must independently pass both gates, and the two variant prediction sequences must be identical. Runs are never pooled to manufacture significance.
 

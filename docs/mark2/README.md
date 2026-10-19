@@ -78,19 +78,22 @@ contractは次を結果取得前に固定する。
 - `independent_variable`: 変更を許可する一つの識別子と説明
 - `primary_metric`: `exact_match_accuracy`を増加させる方向
 - `decision_rule`: 最小accuracy差、有意水準、one-sided exact paired testの識別子、variant 2 runの予測一致要件
+- schema v2の`resource_budget`: same-commit baselineに対する追加peak allocated GPU memory上限と、baseline 2 runの平均生成時間に対する各variant runの倍率上限
 
-未知・欠落key、不正な型やID、非有限数、範囲外の値は拒否される。特にbooleanを数値としては受理しない。まず作成したcontract単体を検査し、成功後に同じファイルをrunnerへ指定する。
+schema v1は既存placeholder contractのvalidator、`check-experiment-contract`、runnerによるartifact bookkeepingに限って後方互換を維持する。controlled experimentのqualificationは`resource_budget`が必須のschema v2だけを受理し、v1 artifactは理由付きで不適格にする。未知・欠落key、不正な型やID、非有限数、0以下または範囲外の値は拒否される。特にbooleanを数値としては受理しない。まず作成したcontract単体を検査し、成功後に同じファイルをrunnerへ指定する。
 
 ```bash
 python3 -m mark2.run check-experiment-contract \
   --experiment-contract mark2/configs/experiment_contract_example.json
+python3 -m mark2.run check-experiment-contract \
+  --experiment-contract mark2/configs/predictive_error_extrapolation_v1.json
 python3 -m mark2.run run --backend mock --run-id experiment-bookkeeping \
   --experiment-contract mark2/configs/experiment_contract_example.json
 ```
 
 指定時、runnerはbackend開始前に検証済み本体、canonical JSONのSHA-256、入力copyのファイル名を`manifest.json`へ保存し、run directoryへ`experiment_contract.json`をcopyする。保存copyを読み直して同じcanonical hashを計算すれば、本体・宣言hash・copyの対応を再検証できる。不正なcontractはrun directory作成前にnon-zeroで拒否される。`--experiment-contract`を指定しない既存baseline runのartifact形式は変わらない。
 
-controlled experimentは「Issue #30のbaseline適格性確認 → 承認済み仮説に従うvariant実装 → baseline 2 runとvariant 2 run → 4 artifactの適格性判定 → paired統計・三値判定」の順に進める。実機baselineが適格と確認される前にvariant実装・実験へ進まない。4 runすべてで同じ実験用`--experiment-contract`を指定し、結果取得後に次を実行する。
+controlled experimentは「Issue #30のpreliminary baseline適格性確認 → Issue #62のvariant-capable実装 → その承認済み単一commit/source snapshotで介入無効のbaseline 2 runと介入有効のvariant 2 run → 4 artifactの適格性判定 → paired統計・三値判定」の順に進める。Issue #30のartifactは実機環境とbaseline基盤のpreliminary確認専用であり、controlled experimentの4 runへ流用しない。4 runすべてで同じschema v2実験用`--experiment-contract`を指定し、結果取得後に次を実行する。
 
 ```bash
 python3 -m mark2.run qualify-experiment \
@@ -107,9 +110,11 @@ python3 -m mark2.run evaluate-experiment \
   --output artifacts/mark2/experiment-evaluation.json
 ```
 
-位置引数はbaseline 2 run、variant 2 runの順である。`qualify-experiment`は各artifactに既存のrepository-measured検査を適用し、experiment contractの本体・canonical SHA-256・保存copy、全directory/run IDの一意性、各pair内のcommit/source/固定環境、variantの事前登録済み予測再現条件、pair間の評価contract・sample順・target・prompt/model/runtime条件を検査する。baselineとvariantのcommit/source差だけは許可し、`pair_sources`へ明示する。
+位置引数はbaseline 2 run、variant 2 runの順である。`qualify-experiment`は各artifactに既存のrepository-measured検査を適用し、schema v2 contractの本体・canonical SHA-256・保存copy、全directory/run IDの一意性、4 runすべてのcommit/source同一性、固定環境、variantの事前登録済み予測再現条件、評価contract・sample順・target・prompt/model/runtime条件を検査する。
 
-qualification reportの`eligible`は統計処理へ渡せるartifact集合であることだけを表す。1 checkでも不合格ならexit code 1となり、統計へ進めない。
+resource gateは保存済みartifactだけを使う。生成時間は各runの全predictionにある`generation_seconds`の合計で、baseline 2 runの算術平均をreferenceとし、variant run 1と2をそれぞれ倍率上限と比較する。memoryはrun 1同士・run 2同士でGPU indexを対応させ、`gpu_peak_allocated_bytes`のvariant-minus-baselineが全indexで上限以下かを検査する。GPU配列長の不一致、baseline referenceが0秒、欠落・不正・非有限な実測値はfail closedとなる。上限ちょうどは合格する。
+
+qualification reportの`source_evidence`と`resource_budget`には、4 runのcommit/source、schema version、contract上限、runごとの生成時間、baseline reference、各variant比、対応run/GPUごとのpeak値と差が残る。`eligible`は統計処理へ渡せるartifact集合であることだけを表す。1 checkでも不合格ならexit code 1となり、統計へ進めない。resourceまたはsource条件違反は実装・運用上の不適格であり、科学的な`regressed`ではない。条件変更、retry、offload、quantization、入力短縮、別hostへのfallbackは行わない。
 
 `evaluate-experiment`も保存済みqualification reportを信用せず、指定された元artifactへ同じ適格性検査を毎回再実行する。不適格なら`qualification`に全checkを保持し、`comparisons`や`classification`を生成せずexit code 1となる。
 
