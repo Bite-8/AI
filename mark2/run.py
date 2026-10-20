@@ -1366,6 +1366,45 @@ def qualify_experiment_artifacts(
         manifest.get("gpu_peak_allocated_bytes") if isinstance(manifest, dict) else None
         for manifest in manifests
     ]
+    runtime_gpu_counts = [
+        manifest.get("runtime", {}).get("gpu_count")
+        if isinstance(manifest, dict) and isinstance(manifest.get("runtime"), dict)
+        else None
+        for manifest in manifests
+    ]
+    preflight_gpu_counts = []
+    for preflight in preflights:
+        observed = preflight.get("observed") if isinstance(preflight, dict) else None
+        accelerator = observed.get("accelerator") if isinstance(observed, dict) else None
+        preflight_gpu_counts.append(
+            accelerator.get("gpu_count") if isinstance(accelerator, dict) else None
+        )
+    peak_gpu_count_evidence = [
+        {
+            "run_id": run_id,
+            "runtime_gpu_count": runtime_count,
+            "preflight_gpu_count": preflight_count,
+            "peak_array_length": len(peaks) if isinstance(peaks, list) else None,
+        }
+        for run_id, runtime_count, preflight_count, peaks in zip(
+            run_ids, runtime_gpu_counts, preflight_gpu_counts, peak_values
+        )
+    ]
+    peak_gpu_counts_valid = all(
+        type(item["runtime_gpu_count"]) is int
+        and item["runtime_gpu_count"] > 0
+        and item["runtime_gpu_count"] == item["preflight_gpu_count"]
+        and item["peak_array_length"] == item["runtime_gpu_count"]
+        for item in peak_gpu_count_evidence
+    )
+    _qualification_check(
+        checks,
+        "experiment.peak_memory_gpu_count",
+        "each peak array length equals its validated runtime and preflight GPU count",
+        peak_gpu_count_evidence,
+        peak_gpu_counts_valid,
+        "each run must provide exactly one peak allocated memory value for every validated GPU",
+    )
     peak_arrays_valid = all(
         isinstance(values, list)
         and bool(values)
@@ -1401,6 +1440,7 @@ def qualify_experiment_artifacts(
         type(memory_limit) is int
         and memory_limit > 0
         and peak_arrays_valid
+        and peak_gpu_counts_valid
         and all(
             pair["gpu_index_aligned"]
             and pair["additional_peak_allocated_bytes"] is not None
@@ -1408,7 +1448,11 @@ def qualify_experiment_artifacts(
             for pair in memory_pairs
         )
     )
-    memory_evidence = {"limit_bytes": memory_limit, "pairs": memory_pairs}
+    memory_evidence = {
+        "limit_bytes": memory_limit,
+        "gpu_counts": peak_gpu_count_evidence,
+        "pairs": memory_pairs,
+    }
     _qualification_check(
         checks,
         "experiment.additional_peak_allocated_memory_budget",

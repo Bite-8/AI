@@ -1255,6 +1255,7 @@ class ExperimentQualificationTests(unittest.TestCase):
             "memory_missing",
             "time_over",
             "gpu_mismatch",
+            "gpu_count_mismatch",
             "zero_baseline",
         )
         for case in cases:
@@ -1293,6 +1294,14 @@ class ExperimentQualificationTests(unittest.TestCase):
                     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                     manifest["gpu_peak_allocated_bytes"].append(1)
                     run.write_json(manifest_path, manifest)
+                elif case == "gpu_count_mismatch":
+                    for artifact in artifacts:
+                        manifest_path = artifact / "manifest.json"
+                        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                        manifest["gpu_peak_allocated_bytes"].append(
+                            manifest["gpu_peak_allocated_bytes"][0]
+                        )
+                        run.write_json(manifest_path, manifest)
                 elif case == "zero_baseline":
                     for artifact in artifacts[:2]:
                         rows = run._predictions(artifact / "predictions.jsonl")
@@ -1310,6 +1319,9 @@ class ExperimentQualificationTests(unittest.TestCase):
                     evaluation = run.evaluate_experiment_artifacts(*artifacts)
                     self.assertNotIn("comparisons", evaluation)
                     self.assertNotIn("classification", evaluation)
+                if case == "gpu_count_mismatch":
+                    failed = {check["name"] for check in result["checks"] if not check["passed"]}
+                    self.assertIn("experiment.peak_memory_gpu_count", failed)
                 if case == "time_over":
                     report_path = Path(folder) / "ineligible.json"
                     with patch.object(
