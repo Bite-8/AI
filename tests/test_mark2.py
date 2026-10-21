@@ -1340,6 +1340,50 @@ class ExperimentQualificationTests(unittest.TestCase):
                         json.loads(report_path.read_text(encoding="utf-8"))["eligible"]
                     )
 
+    def test_generation_time_overflow_is_reported_as_ineligible_by_both_clis(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = self.make_artifacts(root)
+            for artifact in artifacts:
+                rows = run._predictions(artifact / "predictions.jsonl")
+                for row in rows:
+                    row["generation_seconds"] = sys.float_info.max
+                with (artifact / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                    for row in rows:
+                        handle.write(json.dumps(row) + "\n")
+
+            qualification = run.qualify_experiment_artifacts(*artifacts)
+            self.assertFalse(qualification["eligible"])
+            self.assertEqual(
+                qualification["resource_budget"]["generation_time"]["run_generation_seconds"],
+                [None, None, None, None],
+            )
+            failed = {check["name"] for check in qualification["checks"] if not check["passed"]}
+            self.assertIn("experiment.variant_generation_time_budget", failed)
+
+            for command in ("qualify-experiment", "evaluate-experiment"):
+                with self.subTest(command=command):
+                    report_path = root / f"{command}.json"
+                    stdout = io.StringIO()
+                    with patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "mark2.run",
+                            command,
+                            *(str(path) for path in artifacts),
+                            "--output",
+                            str(report_path),
+                        ],
+                    ), patch.object(sys, "stdout", stdout):
+                        self.assertEqual(run.main(), 1)
+                    report = json.loads(report_path.read_text(encoding="utf-8"))
+                    self.assertEqual(report, json.loads(stdout.getvalue()))
+                    self.assertFalse(report["eligible"])
+                    if command == "evaluate-experiment":
+                        self.assertNotIn("comparisons", report)
+                        self.assertNotIn("classification", report)
+
     def test_cross_arm_commit_and_source_mismatch_is_rejected(self):
         for field, value in (("git_commit", "b" * 40), ("source_sha256", {"different.py": "0" * 64})):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as folder:

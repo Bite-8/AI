@@ -432,6 +432,15 @@ def _is_bounded_number(value: Any, minimum: int | float, maximum: int | float) -
     )
 
 
+def _finite_sum(values: Iterable[int | float]) -> float | None:
+    """Return an exactly rounded finite sum, or None when it cannot be represented."""
+    try:
+        total = math.fsum(values)
+    except (OverflowError, ValueError):
+        return None
+    return total if math.isfinite(total) else None
+
+
 def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     content, error = _read_regular_bytes(path)
     if error is not None:
@@ -1325,19 +1334,20 @@ def qualify_experiment_artifacts(
         valid = rows is not None and bool(rows) and all(
             _is_bounded_number(value, 0, sys.float_info.max) for value in values
         )
-        total = math.fsum(values) if valid else None
-        generation_totals.append(total if total is not None and math.isfinite(total) else None)
+        generation_totals.append(_finite_sum(values) if valid else None)
     baseline_reference = (
-        math.fsum(generation_totals[:2]) / 2
+        _finite_sum(value / 2 for value in generation_totals[:2])
         if all(value is not None for value in generation_totals[:2])
         else None
     )
-    time_ratios = [
-        value / baseline_reference
-        if value is not None and baseline_reference is not None and baseline_reference > 0
-        else None
-        for value in generation_totals[2:]
-    ]
+    time_ratios = []
+    for value in generation_totals[2:]:
+        ratio = (
+            value / baseline_reference
+            if value is not None and baseline_reference is not None and baseline_reference > 0
+            else None
+        )
+        time_ratios.append(ratio if ratio is not None and math.isfinite(ratio) else None)
     time_passed = (
         _is_bounded_number(time_limit, 0, sys.float_info.max)
         and baseline_reference is not None
