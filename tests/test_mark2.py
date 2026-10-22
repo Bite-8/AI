@@ -302,6 +302,9 @@ class ExperimentContractTests(unittest.TestCase):
                 maximum_variant_generation_time_ratio=float("inf")
             ),
             lambda value: value["resource_budget"].update(
+                maximum_variant_generation_time_ratio=10**400
+            ),
+            lambda value: value["resource_budget"].update(
                 maximum_variant_generation_time_ratio=0
             ),
         )
@@ -1364,6 +1367,51 @@ class ExperimentQualificationTests(unittest.TestCase):
             for command in ("qualify-experiment", "evaluate-experiment"):
                 with self.subTest(command=command):
                     report_path = root / f"{command}.json"
+                    stdout = io.StringIO()
+                    with patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "mark2.run",
+                            command,
+                            *(str(path) for path in artifacts),
+                            "--output",
+                            str(report_path),
+                        ],
+                    ), patch.object(sys, "stdout", stdout):
+                        self.assertEqual(run.main(), 1)
+                    report = json.loads(report_path.read_text(encoding="utf-8"))
+                    self.assertEqual(report, json.loads(stdout.getvalue()))
+                    self.assertFalse(report["eligible"])
+                    if command == "evaluate-experiment":
+                        self.assertNotIn("comparisons", report)
+                        self.assertNotIn("classification", report)
+
+    def test_oversized_integer_time_ratio_is_reported_as_ineligible_by_both_clis(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = self.make_artifacts(root)
+            contract = read_experiment_contract(PREDICTIVE_EXPERIMENT_CONTRACT)
+            contract["resource_budget"]["maximum_variant_generation_time_ratio"] = 10**400
+            for artifact in artifacts:
+                attach_experiment_contract(artifact, contract)
+
+            qualification = run.qualify_experiment_artifacts(*artifacts)
+            self.assertFalse(qualification["eligible"])
+            failed = {
+                check["name"]: check["actual"]
+                for check in qualification["checks"]
+                if not check["passed"]
+            }
+            for index in range(1, 5):
+                self.assertEqual(
+                    failed[f"run{index}.experiment_contract_schema"],
+                    "resource_budget.maximum_variant_generation_time_ratio must be a finite number",
+                )
+
+            for command in ("qualify-experiment", "evaluate-experiment"):
+                with self.subTest(command=command):
+                    report_path = root / f"oversized-{command}.json"
                     stdout = io.StringIO()
                     with patch.object(
                         sys,

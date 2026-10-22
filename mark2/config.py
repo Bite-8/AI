@@ -122,9 +122,15 @@ def _stable_id(value: Any, label: str) -> None:
 
 
 def _finite_number(value: Any, label: str) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value):
+    if type(value) not in (int, float):
         raise ValueError(f"{label} must be a finite number")
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be a finite number") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{label} must be a finite number")
+    return number
 
 
 def validate_experiment_contract(contract: Any) -> dict[str, Any]:
