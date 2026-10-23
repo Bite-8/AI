@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "experiment_id": "predictive-error-extrapolation-qwen35-9b-mmlu-v1",
   "hypothesis_id": "predictive-error-extrapolation-improves-mmlu-v1",
   "independent_variable": {
@@ -15,5 +15,9 @@
     "significance_level": 0.05,
     "paired_test": "exact-binomial-discordant-one-sided",
     "require_identical_variant_predictions": true
+  },
+  "resource_budget": {
+    "maximum_additional_peak_allocated_bytes": 134217728,
+    "maximum_variant_generation_time_ratio": 1.1
   }
 }

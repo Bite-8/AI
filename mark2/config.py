@@ -122,27 +122,39 @@ def _stable_id(value: Any, label: str) -> None:
 
 
 def _finite_number(value: Any, label: str) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value):
+    if type(value) not in (int, float):
         raise ValueError(f"{label} must be a finite number")
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be a finite number") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{label} must be a finite number")
+    return number
 
 
 def validate_experiment_contract(contract: Any) -> dict[str, Any]:
     """Validate a preregistered controlled-experiment contract."""
+    if not isinstance(contract, dict):
+        raise ValueError("experiment contract must be an object")
+    schema_version = contract.get("schema_version")
+    if type(schema_version) is not int or schema_version not in (1, 2):
+        raise ValueError("experiment contract schema_version must be 1 or 2")
+    expected_keys = {
+        "schema_version",
+        "experiment_id",
+        "hypothesis_id",
+        "independent_variable",
+        "primary_metric",
+        "decision_rule",
+    }
+    if schema_version == 2:
+        expected_keys.add("resource_budget")
     contract = _exact_keys(
         contract,
-        {
-            "schema_version",
-            "experiment_id",
-            "hypothesis_id",
-            "independent_variable",
-            "primary_metric",
-            "decision_rule",
-        },
+        expected_keys,
         "experiment contract",
     )
-    if type(contract["schema_version"]) is not int or contract["schema_version"] != 1:
-        raise ValueError("experiment contract schema_version must be 1")
     _stable_id(contract["experiment_id"], "experiment_id")
     _stable_id(contract["hypothesis_id"], "hypothesis_id")
 
@@ -184,6 +196,29 @@ def validate_experiment_contract(contract: Any) -> dict[str, Any]:
         raise ValueError("unsupported decision_rule.paired_test")
     if not isinstance(rule["require_identical_variant_predictions"], bool):
         raise ValueError("require_identical_variant_predictions must be boolean")
+
+    if schema_version == 2:
+        budget = _exact_keys(
+            contract["resource_budget"],
+            {
+                "maximum_additional_peak_allocated_bytes",
+                "maximum_variant_generation_time_ratio",
+            },
+            "resource_budget",
+        )
+        memory = budget["maximum_additional_peak_allocated_bytes"]
+        if type(memory) is not int or memory <= 0:
+            raise ValueError(
+                "resource_budget.maximum_additional_peak_allocated_bytes must be a positive integer"
+            )
+        time_ratio = _finite_number(
+            budget["maximum_variant_generation_time_ratio"],
+            "resource_budget.maximum_variant_generation_time_ratio",
+        )
+        if time_ratio <= 0:
+            raise ValueError(
+                "resource_budget.maximum_variant_generation_time_ratio must be positive"
+            )
     return contract
 
 

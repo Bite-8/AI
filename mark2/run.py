@@ -432,6 +432,15 @@ def _is_bounded_number(value: Any, minimum: int | float, maximum: int | float) -
     )
 
 
+def _finite_sum(values: Iterable[int | float]) -> float | None:
+    """Return an exactly rounded finite sum, or None when it cannot be represented."""
+    try:
+        total = math.fsum(values)
+    except (OverflowError, ValueError):
+        return None
+    return total if math.isfinite(total) else None
+
+
 def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     content, error = _read_regular_bytes(path)
     if error is not None:
@@ -1163,6 +1172,18 @@ def qualify_experiment_artifacts(
         and all(value == contract_hashes[0] for value in contract_hashes),
         "all four runs must belong to the same preregistered experiment",
     )
+    schema_versions = [
+        contract.get("schema_version") if isinstance(contract, dict) else None
+        for contract in experiment_contracts
+    ]
+    _qualification_check(
+        checks,
+        "experiment.contract_schema_v2",
+        [2, 2, 2, 2],
+        schema_versions,
+        schema_versions == [2, 2, 2, 2],
+        "controlled-experiment qualification requires schema v2 with a resource budget",
+    )
 
     variant_rule = (
         experiment_contracts[0].get("decision_rule")
@@ -1262,14 +1283,207 @@ def qualify_experiment_artifacts(
             "identical within pair",
             pair_sources[name],
             pair_sources[name][0] is not None and pair_sources[name][0] == pair_sources[name][1],
-            f"{name} runs must use one commit and source snapshot; the other pair may differ",
+            f"{name} runs must use one commit and source snapshot",
         )
 
+    source_evidence = [
+        {
+            "run_id": manifest.get("run_id"),
+            "git_commit": manifest.get("git_commit"),
+            "source_sha256": manifest.get("source_sha256"),
+        }
+        if isinstance(manifest, dict)
+        else None
+        for manifest in manifests
+    ]
+    commits = [item["git_commit"] if item is not None else None for item in source_evidence]
+    sources = [item["source_sha256"] if item is not None else None for item in source_evidence]
+    _qualification_check(
+        checks,
+        "experiment.same_git_commit",
+        "one identical commit across all four runs",
+        commits,
+        commits[0] is not None and all(value == commits[0] for value in commits),
+        "baseline and variant runs must come from the same variant-capable commit",
+    )
+    _qualification_check(
+        checks,
+        "experiment.same_source_sha256",
+        "one identical source snapshot across all four runs",
+        sources,
+        sources[0] is not None and all(value == sources[0] for value in sources),
+        "baseline and variant runs must contain the same source snapshot",
+    )
+
+    first_contract = experiment_contracts[0] if experiment_contracts else None
+    budget = first_contract.get("resource_budget") if isinstance(first_contract, dict) else None
+    memory_limit = (
+        budget.get("maximum_additional_peak_allocated_bytes")
+        if isinstance(budget, dict)
+        else None
+    )
+    time_limit = (
+        budget.get("maximum_variant_generation_time_ratio")
+        if isinstance(budget, dict)
+        else None
+    )
+
+    generation_totals: list[float | None] = []
+    for rows in predictions:
+        values = [row.get("generation_seconds") for row in rows] if rows is not None else []
+        valid = rows is not None and bool(rows) and all(
+            _is_bounded_number(value, 0, sys.float_info.max) for value in values
+        )
+        generation_totals.append(_finite_sum(values) if valid else None)
+    baseline_reference = (
+        _finite_sum(value / 2 for value in generation_totals[:2])
+        if all(value is not None for value in generation_totals[:2])
+        else None
+    )
+    time_ratios = []
+    for value in generation_totals[2:]:
+        ratio = (
+            value / baseline_reference
+            if value is not None and baseline_reference is not None and baseline_reference > 0
+            else None
+        )
+        time_ratios.append(ratio if ratio is not None and math.isfinite(ratio) else None)
+    time_passed = (
+        _is_bounded_number(time_limit, 0, sys.float_info.max)
+        and baseline_reference is not None
+        and baseline_reference > 0
+        and all(
+            _is_bounded_number(value, 0, sys.float_info.max) and value <= time_limit
+            for value in time_ratios
+        )
+    )
+    time_evidence = {
+        "limit_ratio": time_limit,
+        "run_generation_seconds": generation_totals,
+        "baseline_mean_generation_seconds": baseline_reference,
+        "variant_ratios": time_ratios,
+    }
+    _qualification_check(
+        checks,
+        "experiment.variant_generation_time_budget",
+        {"maximum_ratio": time_limit},
+        time_evidence,
+        time_passed,
+        "each variant run total generation time must not exceed the baseline two-run mean by the preregistered ratio",
+    )
+
+    peak_values = [
+        manifest.get("gpu_peak_allocated_bytes") if isinstance(manifest, dict) else None
+        for manifest in manifests
+    ]
+    runtime_gpu_counts = [
+        manifest.get("runtime", {}).get("gpu_count")
+        if isinstance(manifest, dict) and isinstance(manifest.get("runtime"), dict)
+        else None
+        for manifest in manifests
+    ]
+    preflight_gpu_counts = []
+    for preflight in preflights:
+        observed = preflight.get("observed") if isinstance(preflight, dict) else None
+        accelerator = observed.get("accelerator") if isinstance(observed, dict) else None
+        preflight_gpu_counts.append(
+            accelerator.get("gpu_count") if isinstance(accelerator, dict) else None
+        )
+    peak_gpu_count_evidence = [
+        {
+            "run_id": run_id,
+            "runtime_gpu_count": runtime_count,
+            "preflight_gpu_count": preflight_count,
+            "peak_array_length": len(peaks) if isinstance(peaks, list) else None,
+        }
+        for run_id, runtime_count, preflight_count, peaks in zip(
+            run_ids, runtime_gpu_counts, preflight_gpu_counts, peak_values
+        )
+    ]
+    peak_gpu_counts_valid = all(
+        type(item["runtime_gpu_count"]) is int
+        and item["runtime_gpu_count"] > 0
+        and item["runtime_gpu_count"] == item["preflight_gpu_count"]
+        and item["peak_array_length"] == item["runtime_gpu_count"]
+        for item in peak_gpu_count_evidence
+    )
+    _qualification_check(
+        checks,
+        "experiment.peak_memory_gpu_count",
+        "each peak array length equals its validated runtime and preflight GPU count",
+        peak_gpu_count_evidence,
+        peak_gpu_counts_valid,
+        "each run must provide exactly one peak allocated memory value for every validated GPU",
+    )
+    peak_arrays_valid = all(
+        isinstance(values, list)
+        and bool(values)
+        and all(type(value) is int and value >= 0 for value in values)
+        for values in peak_values
+    )
+    memory_pairs = []
+    for pair_index in range(2):
+        baseline_peaks = peak_values[pair_index]
+        variant_peaks = peak_values[pair_index + 2]
+        matching = (
+            isinstance(baseline_peaks, list)
+            and isinstance(variant_peaks, list)
+            and len(baseline_peaks) == len(variant_peaks)
+            and bool(baseline_peaks)
+        )
+        differences = (
+            [variant - baseline for baseline, variant in zip(baseline_peaks, variant_peaks)]
+            if matching and peak_arrays_valid
+            else None
+        )
+        memory_pairs.append(
+            {
+                "baseline_run_id": run_ids[pair_index],
+                "variant_run_id": run_ids[pair_index + 2],
+                "baseline_peak_allocated_bytes": baseline_peaks,
+                "variant_peak_allocated_bytes": variant_peaks,
+                "gpu_index_aligned": matching,
+                "additional_peak_allocated_bytes": differences,
+            }
+        )
+    memory_passed = (
+        type(memory_limit) is int
+        and memory_limit > 0
+        and peak_arrays_valid
+        and peak_gpu_counts_valid
+        and all(
+            pair["gpu_index_aligned"]
+            and pair["additional_peak_allocated_bytes"] is not None
+            and all(value <= memory_limit for value in pair["additional_peak_allocated_bytes"])
+            for pair in memory_pairs
+        )
+    )
+    memory_evidence = {
+        "limit_bytes": memory_limit,
+        "gpu_counts": peak_gpu_count_evidence,
+        "pairs": memory_pairs,
+    }
+    _qualification_check(
+        checks,
+        "experiment.additional_peak_allocated_memory_budget",
+        {"maximum_additional_bytes_per_gpu": memory_limit},
+        memory_evidence,
+        memory_passed,
+        "each corresponding variant GPU peak must stay within the preregistered increase over baseline",
+    )
+
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "mode": "repository-measured-controlled-experiment-qualification",
         "run_ids": run_ids,
         "pair_sources": pair_sources,
+        "source_evidence": source_evidence,
+        "resource_budget": {
+            "contract_schema_version": schema_versions[0] if schema_versions else None,
+            "limits": budget,
+            "generation_time": time_evidence,
+            "peak_allocated_memory": memory_evidence,
+        },
         "eligible": all(check["passed"] for check in checks),
         "checks": checks,
     }

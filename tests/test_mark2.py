@@ -22,6 +22,9 @@ from mark2.environment import evaluate_preflight, read_profile
 EXPECTED_COMMIT = run.command(
     ["git", "-C", str(run.REPOSITORY_ROOT), "rev-parse", "HEAD"]
 )["output"]
+PREDICTIVE_EXPERIMENT_CONTRACT = (
+    run.PACKAGE_DIR / "configs" / "predictive_error_extrapolation_v1.json"
+)
 
 
 def make_measured_artifact(path, run_id):
@@ -83,6 +86,7 @@ def make_measured_artifact(path, run_id):
             "gpu_count": 1,
             "gpu_names": ["NVIDIA L4"],
         },
+        "gpu_peak_allocated_bytes": [20_000_000_000],
         "metrics": run.aggregate(rows),
         "preflight": {"passed": True, "report": "preflight.json", "profile": str(run.DEFAULT_PROFILE)},
     }
@@ -240,6 +244,7 @@ class ExperimentContractTests(unittest.TestCase):
         decision = decision_path.read_text(encoding="utf-8")
 
         fields = {
+            "schema_version": str(contract["schema_version"]),
             "experiment_id": contract["experiment_id"],
             "hypothesis_id": contract["hypothesis_id"],
             "independent_variable.id": contract["independent_variable"]["id"],
@@ -255,6 +260,12 @@ class ExperimentContractTests(unittest.TestCase):
             "decision_rule.require_identical_variant_predictions": str(
                 contract["decision_rule"]["require_identical_variant_predictions"]
             ).lower(),
+            "resource_budget.maximum_additional_peak_allocated_bytes": str(
+                contract["resource_budget"]["maximum_additional_peak_allocated_bytes"]
+            ),
+            "resource_budget.maximum_variant_generation_time_ratio": str(
+                contract["resource_budget"]["maximum_variant_generation_time_ratio"]
+            ),
         }
         for field, value in fields.items():
             with self.subTest(field=field):
@@ -266,6 +277,43 @@ class ExperimentContractTests(unittest.TestCase):
             contract["independent_variable"]["id"],
             "final-layer-prediction-error-extrapolation-beta-0.10",
         )
+
+    def test_schema_v2_resource_budget_is_strict_and_v1_remains_valid(self):
+        validate_experiment_contract(self.contract)
+        contract = read_experiment_contract(PREDICTIVE_EXPERIMENT_CONTRACT)
+        self.assertEqual(contract["schema_version"], 2)
+        budget = contract["resource_budget"]
+        self.assertEqual(budget["maximum_additional_peak_allocated_bytes"], 128 * 1024**2)
+        self.assertEqual(budget["maximum_variant_generation_time_ratio"], 1.1)
+
+        mutations = (
+            lambda value: value.pop("resource_budget"),
+            lambda value: value["resource_budget"].update(unknown=1),
+            lambda value: value["resource_budget"].update(
+                maximum_additional_peak_allocated_bytes=True
+            ),
+            lambda value: value["resource_budget"].update(
+                maximum_additional_peak_allocated_bytes=0
+            ),
+            lambda value: value["resource_budget"].update(
+                maximum_variant_generation_time_ratio=False
+            ),
+            lambda value: value["resource_budget"].update(
+                maximum_variant_generation_time_ratio=float("inf")
+            ),
+            lambda value: value["resource_budget"].update(
+                maximum_variant_generation_time_ratio=10**400
+            ),
+            lambda value: value["resource_budget"].update(
+                maximum_variant_generation_time_ratio=0
+            ),
+        )
+        for mutate in mutations:
+            invalid = deepcopy(contract)
+            mutate(invalid)
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    validate_experiment_contract(invalid)
 
     def test_exact_keys_are_required_at_every_level(self):
         cases = []
@@ -1075,7 +1123,9 @@ class ExperimentQualificationTests(unittest.TestCase):
         artifacts = tuple(root / name for name in ("baseline-1", "baseline-2", "variant-1", "variant-2"))
         for artifact, run_id in zip(artifacts, ("baseline-1", "baseline-2", "variant-1", "variant-2")):
             make_measured_artifact(artifact, run_id)
-            attach_experiment_contract(artifact)
+            attach_experiment_contract(
+                artifact, read_experiment_contract(PREDICTIVE_EXPERIMENT_CONTRACT)
+            )
         return artifacts
 
     def test_four_artifact_experiment_is_eligible_and_cli_writes_report(self):
@@ -1179,12 +1229,224 @@ class ExperimentQualificationTests(unittest.TestCase):
             failed = {check["name"] for check in result["checks"] if not check["passed"]}
             self.assertIn("variant.pair.identical_predictions", failed)
 
-            contract = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+            contract = read_experiment_contract(PREDICTIVE_EXPERIMENT_CONTRACT)
             contract["decision_rule"]["require_identical_variant_predictions"] = False
             for artifact in artifacts:
                 attach_experiment_contract(artifact, contract)
             result = run.qualify_experiment_artifacts(*artifacts)
             self.assertTrue(result["eligible"])
+
+    def test_v1_contract_is_bookkeeping_valid_but_not_qualification_eligible(self):
+        with tempfile.TemporaryDirectory() as folder:
+            artifacts = self.make_artifacts(Path(folder))
+            v1 = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+            for artifact in artifacts:
+                attach_experiment_contract(artifact, v1)
+            result = run.qualify_experiment_artifacts(*artifacts)
+            self.assertFalse(result["eligible"])
+            failed = {check["name"] for check in result["checks"] if not check["passed"]}
+            self.assertEqual(result["resource_budget"]["contract_schema_version"], 1)
+            self.assertIn("experiment.contract_schema_v2", failed)
+            evaluation = run.evaluate_experiment_artifacts(*artifacts)
+            self.assertNotIn("comparisons", evaluation)
+            self.assertNotIn("classification", evaluation)
+
+    def test_same_source_and_resource_budget_boundaries(self):
+        cases = (
+            "boundary",
+            "memory_over",
+            "memory_missing",
+            "time_over",
+            "gpu_mismatch",
+            "gpu_count_mismatch",
+            "zero_baseline",
+        )
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as folder:
+                artifacts = self.make_artifacts(Path(folder))
+                limit = 128 * 1024**2
+                for artifact in artifacts[2:]:
+                    manifest_path = artifact / "manifest.json"
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest["gpu_peak_allocated_bytes"] = [20_000_000_000 + limit]
+                    run.write_json(manifest_path, manifest)
+                    rows = run._predictions(artifact / "predictions.jsonl")
+                    for row in rows:
+                        row["generation_seconds"] = 0.11
+                    with (artifact / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                        for row in rows:
+                            handle.write(json.dumps(row) + "\n")
+                if case == "memory_over":
+                    manifest_path = artifacts[2] / "manifest.json"
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest["gpu_peak_allocated_bytes"][0] += 1
+                    run.write_json(manifest_path, manifest)
+                elif case == "memory_missing":
+                    manifest_path = artifacts[2] / "manifest.json"
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest.pop("gpu_peak_allocated_bytes")
+                    run.write_json(manifest_path, manifest)
+                elif case == "time_over":
+                    rows = run._predictions(artifacts[2] / "predictions.jsonl")
+                    rows[0]["generation_seconds"] += 0.000001
+                    with (artifacts[2] / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                        for row in rows:
+                            handle.write(json.dumps(row) + "\n")
+                elif case == "gpu_mismatch":
+                    manifest_path = artifacts[2] / "manifest.json"
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest["gpu_peak_allocated_bytes"].append(1)
+                    run.write_json(manifest_path, manifest)
+                elif case == "gpu_count_mismatch":
+                    for artifact in artifacts:
+                        manifest_path = artifact / "manifest.json"
+                        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                        manifest["gpu_peak_allocated_bytes"].append(
+                            manifest["gpu_peak_allocated_bytes"][0]
+                        )
+                        run.write_json(manifest_path, manifest)
+                elif case == "zero_baseline":
+                    for artifact in artifacts[:2]:
+                        rows = run._predictions(artifact / "predictions.jsonl")
+                        for row in rows:
+                            row["generation_seconds"] = 0.0
+                        with (artifact / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                            for row in rows:
+                                handle.write(json.dumps(row) + "\n")
+
+                result = run.qualify_experiment_artifacts(*artifacts)
+                self.assertEqual(result["eligible"], case == "boundary")
+                self.assertEqual(result["schema_version"], 2)
+                self.assertEqual(result["resource_budget"]["limits"]["maximum_additional_peak_allocated_bytes"], limit)
+                if case != "boundary":
+                    evaluation = run.evaluate_experiment_artifacts(*artifacts)
+                    self.assertNotIn("comparisons", evaluation)
+                    self.assertNotIn("classification", evaluation)
+                if case == "gpu_count_mismatch":
+                    failed = {check["name"] for check in result["checks"] if not check["passed"]}
+                    self.assertIn("experiment.peak_memory_gpu_count", failed)
+                if case == "time_over":
+                    report_path = Path(folder) / "ineligible.json"
+                    with patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "mark2.run",
+                            "qualify-experiment",
+                            *(str(path) for path in artifacts),
+                            "--output",
+                            str(report_path),
+                        ],
+                    ), patch.object(sys, "stdout", io.StringIO()):
+                        self.assertEqual(run.main(), 1)
+                    self.assertFalse(
+                        json.loads(report_path.read_text(encoding="utf-8"))["eligible"]
+                    )
+
+    def test_generation_time_overflow_is_reported_as_ineligible_by_both_clis(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = self.make_artifacts(root)
+            for artifact in artifacts:
+                rows = run._predictions(artifact / "predictions.jsonl")
+                for row in rows:
+                    row["generation_seconds"] = sys.float_info.max
+                with (artifact / "predictions.jsonl").open("w", encoding="utf-8") as handle:
+                    for row in rows:
+                        handle.write(json.dumps(row) + "\n")
+
+            qualification = run.qualify_experiment_artifacts(*artifacts)
+            self.assertFalse(qualification["eligible"])
+            self.assertEqual(
+                qualification["resource_budget"]["generation_time"]["run_generation_seconds"],
+                [None, None, None, None],
+            )
+            failed = {check["name"] for check in qualification["checks"] if not check["passed"]}
+            self.assertIn("experiment.variant_generation_time_budget", failed)
+
+            for command in ("qualify-experiment", "evaluate-experiment"):
+                with self.subTest(command=command):
+                    report_path = root / f"{command}.json"
+                    stdout = io.StringIO()
+                    with patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "mark2.run",
+                            command,
+                            *(str(path) for path in artifacts),
+                            "--output",
+                            str(report_path),
+                        ],
+                    ), patch.object(sys, "stdout", stdout):
+                        self.assertEqual(run.main(), 1)
+                    report = json.loads(report_path.read_text(encoding="utf-8"))
+                    self.assertEqual(report, json.loads(stdout.getvalue()))
+                    self.assertFalse(report["eligible"])
+                    if command == "evaluate-experiment":
+                        self.assertNotIn("comparisons", report)
+                        self.assertNotIn("classification", report)
+
+    def test_oversized_integer_time_ratio_is_reported_as_ineligible_by_both_clis(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = self.make_artifacts(root)
+            contract = read_experiment_contract(PREDICTIVE_EXPERIMENT_CONTRACT)
+            contract["resource_budget"]["maximum_variant_generation_time_ratio"] = 10**400
+            for artifact in artifacts:
+                attach_experiment_contract(artifact, contract)
+
+            qualification = run.qualify_experiment_artifacts(*artifacts)
+            self.assertFalse(qualification["eligible"])
+            failed = {
+                check["name"]: check["actual"]
+                for check in qualification["checks"]
+                if not check["passed"]
+            }
+            for index in range(1, 5):
+                self.assertEqual(
+                    failed[f"run{index}.experiment_contract_schema"],
+                    "resource_budget.maximum_variant_generation_time_ratio must be a finite number",
+                )
+
+            for command in ("qualify-experiment", "evaluate-experiment"):
+                with self.subTest(command=command):
+                    report_path = root / f"oversized-{command}.json"
+                    stdout = io.StringIO()
+                    with patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "mark2.run",
+                            command,
+                            *(str(path) for path in artifacts),
+                            "--output",
+                            str(report_path),
+                        ],
+                    ), patch.object(sys, "stdout", stdout):
+                        self.assertEqual(run.main(), 1)
+                    report = json.loads(report_path.read_text(encoding="utf-8"))
+                    self.assertEqual(report, json.loads(stdout.getvalue()))
+                    self.assertFalse(report["eligible"])
+                    if command == "evaluate-experiment":
+                        self.assertNotIn("comparisons", report)
+                        self.assertNotIn("classification", report)
+
+    def test_cross_arm_commit_and_source_mismatch_is_rejected(self):
+        for field, value in (("git_commit", "b" * 40), ("source_sha256", {"different.py": "0" * 64})):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as folder:
+                artifacts = self.make_artifacts(Path(folder))
+                manifest_path = artifacts[2] / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest[field] = value
+                run.write_json(manifest_path, manifest)
+                result = run.qualify_experiment_artifacts(*artifacts)
+                self.assertFalse(result["eligible"])
+                failed = {check["name"] for check in result["checks"] if not check["passed"]}
+                self.assertIn(
+                    "experiment.same_git_commit" if field == "git_commit" else "experiment.same_source_sha256",
+                    failed,
+                )
 
 
 class ExperimentEvaluationTests(unittest.TestCase):
@@ -1192,7 +1454,9 @@ class ExperimentEvaluationTests(unittest.TestCase):
         artifacts = tuple(root / name for name in ("baseline-1", "baseline-2", "variant-1", "variant-2"))
         for artifact, run_id in zip(artifacts, ("baseline-1", "baseline-2", "variant-1", "variant-2")):
             make_measured_artifact(artifact, run_id)
-            attach_experiment_contract(artifact)
+            attach_experiment_contract(
+                artifact, read_experiment_contract(PREDICTIVE_EXPERIMENT_CONTRACT)
+            )
         return artifacts
 
     def set_pair_results(self, artifacts, baseline_correct, variant_first_correct, variant_second_correct=None):
@@ -1257,7 +1521,7 @@ class ExperimentEvaluationTests(unittest.TestCase):
         for expected, (baseline_correct, variant_correct) in cases.items():
             with self.subTest(expected=expected), tempfile.TemporaryDirectory() as folder:
                 artifacts = self.make_artifacts(Path(folder))
-                contract = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+                contract = read_experiment_contract(PREDICTIVE_EXPERIMENT_CONTRACT)
                 contract["decision_rule"].update(
                     minimum_accuracy_difference=0.01,
                     significance_level=0.5,
@@ -1281,7 +1545,7 @@ class ExperimentEvaluationTests(unittest.TestCase):
     def test_nonidentical_variant_runs_are_not_pooled(self):
         with tempfile.TemporaryDirectory() as folder:
             artifacts = self.make_artifacts(Path(folder))
-            contract = read_experiment_contract(run.DEFAULT_EXPERIMENT_CONTRACT)
+            contract = read_experiment_contract(PREDICTIVE_EXPERIMENT_CONTRACT)
             contract["decision_rule"]["require_identical_variant_predictions"] = False
             contract["decision_rule"]["significance_level"] = 0.05
             for artifact in artifacts:
@@ -1309,8 +1573,12 @@ class ExperimentEvaluationTests(unittest.TestCase):
             report = json.loads(stdout.getvalue())
             self.assertEqual(report, json.loads(report_path.read_text(encoding="utf-8")))
             self.assertEqual(report["classification"]["result"], "supported")
-            self.assertEqual(report["experiment_id"], "example-controlled-experiment-v1")
-            self.assertEqual(report["hypothesis_id"], "example-hypothesis-not-evaluated")
+            self.assertEqual(
+                report["experiment_id"], "predictive-error-extrapolation-qwen35-9b-mmlu-v1"
+            )
+            self.assertEqual(
+                report["hypothesis_id"], "predictive-error-extrapolation-improves-mmlu-v1"
+            )
             self.assertEqual(report["run_ids"], ["baseline-1", "baseline-2", "variant-1", "variant-2"])
             self.assertEqual(set(report["pair_sources"]), {"baseline", "variant"})
             self.assertEqual(len(report["experiment_contract_sha256"]), 64)
