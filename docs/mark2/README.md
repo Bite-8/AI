@@ -44,13 +44,13 @@ Mark2はHumanが用意した既存GPU EC2を再利用する。機械可読なsou
 | NVIDIA driver / CUDA / GPU型・VRAM | stoppedのため未検証 |
 | SSM Agent version | stoppedかつSSM照会権限不足のため未検証 |
 
-未検証項目を推測で固定しない。次にHumanが対象、利用目的、費用上限、終了時刻を明示して有料startを承認したsessionで、`run-command inventory`を実行する。その出力が[`qwen35_9b_l4_profile.json`](../../mark2/configs/qwen35_9b_l4_profile.json)と一致するか確認し、不一致ならmodel/datasetを取得せず停止する。AMI nameとvolume構成は必要なread-only権限が付与された後に再取得する。
+未検証項目を推測で固定しない。次に対象、利用目的、費用上限、終了時刻を定めて実機を起動するsessionで、`run-command inventory`を実行する。その出力が[`qwen35_9b_l4_profile.json`](../../mark2/configs/qwen35_9b_l4_profile.json)と一致するか確認し、不一致ならmodel/datasetを取得せず停止する。AMI nameとvolume構成は必要なread-only権限が付与された後に再取得する。
 
-Repository機能が許可する操作は固定targetの`status`、通常の`start`/`stop`、allowlist済みSSM Run Command、SSM Session Managerだけである。新規resource作成、terminate、reboot、強制stop、構成・権限変更、SSH fallbackは実装しない。各actionはEC2とSSMから返ったinstance IDを固定値と照合し、複数件、ID不一致、terminated、不明・遷移中state、SSM offline、権限エラー、timeoutでfail closedする。別instance、別region、別接続方式へfallbackしない。
+Repositoryが現在実装するAWS操作は、固定targetの`status`、通常の`start`/`stop`、allowlist済みSSM Run Command、SSM Session Managerである。terminate、reboot、強制stop、構成・権限変更、SSH fallbackは実装しない。各actionはEC2とSSMから返ったinstance IDを固定値と照合し、複数件、ID不一致、terminated、不明・遷移中state、SSM offline、権限エラー、timeoutでfail closedする。別instance、別region、別接続方式へfallbackしない。
 
 固定targetのEC2応答が検証済みの`stopped`である場合に限り、SSM managed-instance一覧の0件は停止中にrecordが掲載されない状態として受理する。このとき`status`と`stop`のJSONは`ssm.record_present`を`false`として返し、SSMのID、ping状態、agent情報を捏造しない。SSM API失敗、不正応答、複数件、ID不一致、またはEC2が`stopped`以外での0件は引き続きnon-zeroとなる。recordが存在する場合は`ssm.record_present`が`true`となる。`start`の完了、`run-command`、`session`にはEC2 `running`と固定targetのSSM `Online`の両方が必要であり、この停止時例外は実行可能状態を保証しない。
 
-`start`は課金を開始する。Humanが利用目的と時間上限を明示した後に限り、固定instance IDをconfirmationとして指定する。作業者はsession終了時に`stop`を実行し、続けて`status`で`stopped`を確認する責任を持つ。自動化やAI workflowはHumanの明示承認なしにstartしない。単価や上限は変わり得るため、過去の見積りを承認として流用しない。
+`start`は課金を開始する。利用目的と時間上限を定め、固定instance IDをconfirmationとして指定する。作業者はsession終了時に`stop`を実行し、続けて`status`で`stopped`を確認する責任を持つ。単価や上限は変わり得るため、実行前に現在の条件を確認する。
 
 必要な実行権限は固定targetに対するEC2状態参照・start・通常stopと、SSM managed-instance参照・Run Command・Session Managerである。AWS CLIとSession Manager pluginが利用可能でなければ停止する。SSH用inbound ruleや永続keyは不要である。
 
@@ -146,7 +146,7 @@ python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 python3 -m mark2.instance status
 ```
 
-Humanが対象、目的、時間・費用上限を明示してstartを承認した後だけ、次を実行する。confirmationは課金開始の誤操作を防ぐため固定instance IDと完全一致させる。`start`はEC2がrunningかつSSM Onlineになるまで最大10分だけ待つ。
+対象、目的、時間・費用上限を定めてから、次を実行する。confirmationは課金開始の誤操作を防ぐため固定instance IDと完全一致させる。`start`はEC2がrunningかつSSM Onlineになるまで最大10分だけ待つ。
 
 ```bash
 python3 -m mark2.instance start \
@@ -196,7 +196,7 @@ python3 -m mark2.run qualify \
 - CUDA/BF16が使えない、単一L4に収まらない、offloadまたはOOMが発生する
 - disk空きが開始時100 GB未満、download後50 GB未満
 - unit test、mock比較、1回目runが失敗する
-- Humanが承認した時間または費用上限の超過が見込まれる
+- 実行前に定めた時間または費用上限の超過が見込まれる
 
 artifactはguest上の`artifacts/mark2/`でmanifestとhashを確認し、SSM session経由の承認済み転送方法で開発hostへ回収する。回収後に双方で`sha256sum`を計算し、一致を確認してからguest側copyの扱いを決める。command文字列へcredentialやsecretを含めず、stdout/stderrにも保存しない。
 

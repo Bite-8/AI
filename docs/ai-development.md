@@ -44,7 +44,7 @@ Mainはlabelからworkflow状態を決めたうえで、`GOAL.md`、現在のRep
 
 WorkとReviewは問題に遭遇したとき、調査継続、Scope内の代替手段、方針修正、現在の対象の保留を、Goalへの寄与と現在の状況から判断する。固定的なblocker分類や一律の試行回数・時間制限は使わない。実行できない操作や未解決事項が残る場合は、必要に応じて観測事実、試行内容、判断理由、残る課題をIssueまたはPRに記録する。
 
-credential、token、secret、不要なaccount ID・network詳細・機密出力はコメントやfixtureに保存しない。IAM変更、有料resourceの作成・起動、購入、本番変更はAgentが自動実行しない。
+credential、token、secret、不要なaccount ID・network詳細・機密出力はコメントやfixtureに保存しない。IAM変更、購入、本番変更はAgentが自動実行しない。
 
 `priority:urgent`は上表の状態とは独立した優先度labelである。Humanだけが新たなurgencyを指定できる。Mainはまず`priority:urgent`とAI状態labelの両方を持つ実行可能な対象へ通常の状態優先順位を適用し、該当がなければ通常queueを処理する。タイトルの`[Hot]`やauthor種別は優先度判定に使用しない。
 
