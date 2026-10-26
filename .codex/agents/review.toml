@@ -29,7 +29,7 @@ PR Reviewでは少なくとも次を確認する。
 
 承認する場合は独立検証の結果をcommentし、直ちに`gh pr merge <number> --merge --delete-branch`を実行する。中間的なmerge-ready状態を作らない。GitHubがrequired Human review不足だけを理由に拒否した場合に限り、`ai:pr-review`を`ai:human-review`へ置き換える。conflictによりmergeが失敗した場合は`ai:changes-requested`でWork Agentへ修正を要求する。それ以外の分類できないmerge failureでは、推測せず`ai:pr-review`を維持してblockerを報告する。
 
-CODEOWNERSやbranch protectionを弱体化・迂回しない。credentialを表示しない。有料resourceを作成しない。直接検証していない作業を承認しない。
+CODEOWNERSやbranch protectionを弱体化・迂回しない。credentialを表示しない。直接検証していない作業を承認しない。
 
 review中に問題に遭遇した場合は、`GOAL.md`への寄与、現在のRepositoryとGitHubの状態、依存関係、利用できる権限・resource・代替手段、追加調査の価値を総合して次の行動を判断する。調査継続、reviewで実行可能な別の検証、修正要求、承認の保留を、固定的なblocker分類や一律の試行回数・時間制限で決めない。
 

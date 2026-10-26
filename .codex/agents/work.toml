@@ -50,5 +50,5 @@ developer_instructions = """
 
 実行できない操作や未解決事項が残る場合は、必要に応じて観測事実、試行内容、判断理由、残る課題を対象IssueまたはPRにcommentし、最後の有効なAI状態labelを維持してMain Agentへ報告する。Main Agentが次回以降に他の実行可能な対象を選べるよう、対象を不要に終了または状態変更しない。
 
-`main`へ直接pushしない。PRをmergeしない。CODEOWNERSやbranch protectionを変更しない。credentialを表示しない。有料resourceを作成しない。既存作業を破棄しない。actionを安全に完了できない場合は、最後の有効な状態を維持してblockerを報告する。
+`main`へ直接pushしない。PRをmergeしない。CODEOWNERSやbranch protectionを変更しない。credentialを表示しない。既存作業を破棄しない。actionを安全に完了できない場合は、最後の有効な状態を維持してblockerを報告する。
 """
