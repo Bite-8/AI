@@ -1,6 +1,6 @@
 [
   {
-    "name": "approved issue routes to implementation",
+    "name": "approved issue routes to Work for its declared deliverable",
     "object_type": "issue",
     "labels": ["ai:issue-approved"],
     "expected_route": "work:implement_issue"

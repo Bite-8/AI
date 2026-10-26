@@ -38,14 +38,14 @@ AI workflowの状態は次のGitHub labelだけで機械判定する。コメン
 
 `priority:urgent`はAI状態labelではなく、Humanが通常queueへの割り込みを指示する優先度labelとする。Agentは自らこのlabelを新規付与してはならない。urgentなIssueからPRを作る場合に限り、その優先度をPRへ引き継ぐ。urgentであってもIssue Review、CI、PR Review、安全停止条件は省略しない。
 
-### Issueの粒度
+### Issueの成果形態と粒度
 
-Work AgentがIssueを提案する際は、まず`GOAL.md`とRepositoryの差分から最も価値の高い課題を選び、その後で課題を依存順の、独立して実装・検証・merge可能な単位へ分解する。単純な最小化は目的にせず、意味のある改善を残しながら1回のPR Reviewで全体を直接検証できる最初の単位だけをIssue化する。
+Work AgentがIssueを提案する際は、まず`GOAL.md`とRepositoryの差分から最も価値の高い課題を選び、成果形態を`PR`または`Issue記録`として明記する。`PR`はRepository変更をreview・mergeするIssue、`Issue記録`は実機検証・評価・研究的な試行の結果をClose Commentへ記録するIssueである。その後で課題を依存順の、独立して完了判定できる単位へ分解する。単純な最小化は目的にせず、mergeまたは結果記録の後に意味のある改善・知見を残し、1回のPR Reviewまたは1回の独立した試行で全体を直接検証できる最初の単位だけをIssue化する。
 
 - 主目的と主要な設計判断をそれぞれ1つに絞る。
 - 独立した成果、failure domain、security boundary、または基盤とその利用機能を一つのIssueへ混在させない。
 - 分割した一部だけを独立して承認・差し戻しできる場合はIssueを狭める。
-- 単独では検証不能、またはmergeしても意味のある改善を残さないほど細かく分割しない。
+- 単独では検証不能、またはmerge・結果記録後に意味のある改善や知見を残さないほど細かく分割しない。
 - 後続候補は現在のScopeや完了条件へ含めず、先行Issueの完了後に最新のRepositoryと`GOAL.md`から再評価する。Sub-issueの作成は必須としない。
 
 ### Routing順序
@@ -79,6 +79,16 @@ CIがpendingのPRと、まだ承認されていない`ai:human-review`のPRは�
 Work AgentとReview Agentは問題に遭遇したとき、`GOAL.md`への寄与、現在のRepositoryとGitHubの状態、依存関係、利用できる権限・resource・代替手段、追加調査の価値を総合して次の行動を判断する。調査継続、Scope内の代替手段、方針修正、現在の対象の保留、別の実行可能な対象への移行を、固定的なblocker分類や一律の試行回数・時間制限で決めない。
 
 実行できない操作や未解決事項が残る場合は、必要に応じて観測事実、試行内容、判断理由、残る課題をIssueまたはPRに記録する。ただし、委任されたscope、権限、安全制約は超えず、IAM、本番・実ホストの操作を暗黙に実行しない。
+
+### Workの成功・失敗
+
+依存未完了、CI pending、一時的なGitHub障害など、Scopeの本体作業をまだ開始していない待ち状態は失敗とせず、その対象をskipまたは最後の有効な状態で待機させる。本体の実装・検証・研究的試行を開始した後、Scope内の調査と安全な代替を尽くしても完了条件を満たせないとWork Agentが判断した場合は、そのIssueを失敗結果として終了する。
+
+- 成果形態`PR`では、全完了条件とtestを満たした後だけPRを作る。初回実装が失敗した場合はPRを作らない。
+- 成果形態`Issue記録`では、成功・失敗のどちらも結果をClose Commentへ記録し、PRを作らない。
+- 失敗時は、`Outcome: failed`、実施内容、失敗段階、直接原因と根拠、test・artifact・log・不合格check、cleanup・停止結果、未解決事項、再挑戦時に変更すべき条件をClose Commentへ記録してIssueをcloseする。
+- 既存PRの修正またはCI修正が達成不能と判明した場合は、PRにも理由を記録してcloseし、対応Issueを同じ失敗記録でcloseする。
+- 失敗した目的へ再挑戦する場合はIssueをreopenせず、原因と変更点を反映した新しいIssueを通常のIssue Reviewから開始する。
 
 ### Merge
 
