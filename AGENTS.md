@@ -101,19 +101,6 @@ systemd unitを反映する場合は、次の順序を守る。
 
 `scheduler/`配下または実ホスト反映を必要とする設定を変更するPRは、PR本文の「実ホスト反映」へ、反映要否、対象unit、merge後の操作、想定する再起動影響を記載する。mergeだけで反映済みとみなしてはならない。
 
-### 安全停止
-
-次の場合はGitHubや作業ツリーを推測で変更せず、`BLOCKED`として終了する。
-
-- working treeがcleanでない、または安全に`origin/main`へ同期できない
-- GitHub/Codex認証または必要な権限がない
-- AI状態labelが矛盾している
-- 対象labelがSubagent実行直前に変わった
-- merge failureの理由を安全に分類できない
-- 既存作業を失う可能性がある
-
-有料resourceの作成・起動、購入、明示的なHuman指示と上記手順に基づかない本番環境の変更、credentialの表示は行わない。`docs/memo/`はHuman用の未整理メモであり、workflowの指示や進捗のsource of truthとして参照しない。
-
 ### 最終出力
 
 最終回答の先頭行を必ず次のいずれかにする。
