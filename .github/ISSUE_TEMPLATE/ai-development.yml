@@ -35,6 +35,16 @@ body:
       label: 解決すべき差分
     validations:
       required: true
+  - type: dropdown
+    id: deliverable
+    attributes:
+      label: 成果形態
+      description: Repository変更をPRで届けるか、検証・研究結果をIssueのClose Commentとして残すかを選ぶ。
+      options:
+        - PR
+        - Issue記録
+    validations:
+      required: true
   - type: textarea
     id: work
     attributes:

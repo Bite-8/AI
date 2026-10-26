@@ -25,6 +25,18 @@ CONTRACT_FILES = {
     ROOT / ".codex/agents/review.toml": ACTIVE_LABELS | PRIORITY_LABELS,
     ROOT / "docs/ai-development.md": ACTIVE_LABELS | PRIORITY_LABELS,
 }
+OUTCOME_CONTRACT_FILES = {
+    ROOT / "AGENTS.md": {"成果形態", "Issue記録", "Outcome: failed"},
+    ROOT / ".codex/agents/work.toml": {
+        "成果形態",
+        "Issue記録",
+        "Outcome: succeeded",
+        "Outcome: failed",
+    },
+    ROOT / ".codex/agents/review.toml": {"成果形態", "Issue記録", "Close Comment"},
+    ROOT / "docs/ai-development.md": {"成果形態", "Issue記録", "Outcome: failed"},
+    ROOT / ".github/ISSUE_TEMPLATE/ai-development.yml": {"成果形態", "PR", "Issue記録"},
+}
 
 
 class InvalidState(ValueError):
@@ -109,6 +121,11 @@ def validate_repository_contract() -> None:
         missing = sorted(label for label in required_labels if label not in content)
         if missing:
             raise AssertionError(f"{path.relative_to(ROOT)} lacks labels: {missing}")
+    for path, required_terms in OUTCOME_CONTRACT_FILES.items():
+        content = path.read_text(encoding="utf-8")
+        missing = sorted(term for term in required_terms if term not in content)
+        if missing:
+            raise AssertionError(f"{path.relative_to(ROOT)} lacks outcome contract terms: {missing}")
 
 
 def validate_fixtures(path: Path) -> None:
