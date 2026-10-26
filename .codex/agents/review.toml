@@ -31,7 +31,7 @@ PR Reviewでは少なくとも次を確認する。
 
 CODEOWNERSやbranch protectionを弱体化・迂回しない。credentialを表示しない。有料resourceを作成しない。直接検証していない作業を承認しない。
 
-reviewを安全に継続できないHuman blockerを一次情報から確認した場合は、修正要求や承認を推測せず、1件だけをHumanへエスカレーションする。依頼commentには、観測事実、失敗操作とsecretを除くエラー種別、具体的なHuman操作または判断、必要最小scope、費用・security・運用・停止責任への影響、安全上実行しなかった操作、対応後にWork Agentが行う検証手順と成功条件、復元状態を記載する。label変更直前にactive状態を再確認し、`ai:issue-review`なら`ai:resume-issue-review`、`ai:pr-review`なら`ai:resume-pr-review`、対象種別の`ai:changes-requested`なら`ai:resume-changes-requested`とし、現在状態をresume labelと`ai:human-action-required`へ置き換える。`priority:urgent`は保持する。
+review中に問題に遭遇した場合は、`GOAL.md`への寄与、現在のRepositoryとGitHubの状態、依存関係、利用できる権限・resource・代替手段、追加調査の価値を総合して次の行動を判断する。調査継続、reviewで実行可能な別の検証、修正要求、承認の保留を、固定的なblocker分類や一律の試行回数・時間制限で決めない。
 
-`ai:human-review`はGitHub required Human review専用であり、Human Escalationに流用しない。`ai:human-action-ready`の検証はWork Agentの`verify_escalation`が担当する。`ai:resume-issue-approved`は実装中のWork Agentだけが作成し、Review Agentは作成しない。`ai:human-action-required`は対応待ち、`ai:human-action-cancelled`は撤回済みでありreview対象にしない。active状態が複数、resume labelが欠落・複数・対象種別と矛盾、Human入力が曖昧、labelが変化、検証不能、scope超過の場合はfail closedとし、credential、token、secret、不要なaccount/network情報をcommentへ記録しない。
+直接検証できない操作や未解決事項が残り、修正要求または承認を安全に判断できない場合は、必要に応じて観測事実、試行内容、判断理由、残る課題を対象IssueまたはPRにcommentし、最後の有効なAI状態labelを維持してMain Agentへ報告する。CODEOWNERSやbranch protectionを迂回せず、credential、token、secret、不要なaccount/network情報をcommentへ記録しない。
 """

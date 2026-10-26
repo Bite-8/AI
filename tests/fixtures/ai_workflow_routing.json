@@ -1,0 +1,108 @@
+[
+  {
+    "name": "approved issue routes to implementation",
+    "object_type": "issue",
+    "labels": ["ai:issue-approved"],
+    "expected_route": "work:implement_issue"
+  },
+  {
+    "name": "issue review routes to independent review",
+    "object_type": "issue",
+    "labels": ["ai:issue-review"],
+    "expected_route": "review:issue"
+  },
+  {
+    "name": "issue revision routes to Work",
+    "object_type": "issue",
+    "labels": ["ai:changes-requested"],
+    "expected_route": "work:revise_issue"
+  },
+  {
+    "name": "PR revision routes to Work",
+    "object_type": "pr",
+    "labels": ["ai:changes-requested"],
+    "expected_route": "work:revise_pr"
+  },
+  {
+    "name": "failed PR CI routes to Work",
+    "object_type": "pr",
+    "labels": ["ai:pr-review"],
+    "ci": "failure",
+    "expected_route": "work:fix_ci"
+  },
+  {
+    "name": "successful PR CI routes to review",
+    "object_type": "pr",
+    "labels": ["ai:pr-review"],
+    "ci": "success",
+    "expected_route": "review:pr"
+  },
+  {
+    "name": "pending PR CI waits",
+    "object_type": "pr",
+    "labels": ["ai:pr-review"],
+    "ci": "pending",
+    "expected_route": null
+  },
+  {
+    "name": "required Human review remains distinct",
+    "object_type": "pr",
+    "labels": ["ai:human-review"],
+    "expected_route": "main:merge_if_human_approved"
+  },
+  {
+    "name": "urgent priority does not bypass Issue review",
+    "object_type": "issue",
+    "labels": ["ai:issue-review", "priority:urgent"],
+    "expected_route": "review:issue"
+  },
+  {
+    "name": "currently non-actionable target is skipped",
+    "object_type": "issue",
+    "labels": ["ai:issue-approved"],
+    "actionable": false,
+    "expected_route": null
+  },
+  {
+    "name": "non-actionable target does not block later work",
+    "candidates": [
+      {
+        "id": "30",
+        "object_type": "issue",
+        "labels": ["ai:issue-approved"],
+        "actionable": false
+      },
+      {
+        "id": "72",
+        "object_type": "issue",
+        "labels": ["ai:issue-review"]
+      }
+    ],
+    "expected_selection": ["72", "review:issue"]
+  },
+  {
+    "name": "required Human review is invalid on an Issue",
+    "object_type": "issue",
+    "labels": ["ai:human-review"],
+    "invalid": true
+  },
+  {
+    "name": "multiple active states are invalid",
+    "object_type": "pr",
+    "labels": ["ai:pr-review", "ai:changes-requested"],
+    "invalid": true
+  },
+  {
+    "name": "missing active state is invalid",
+    "object_type": "issue",
+    "labels": ["priority:urgent"],
+    "invalid": true
+  },
+  {
+    "name": "unknown CI state is invalid",
+    "object_type": "pr",
+    "labels": ["ai:pr-review"],
+    "ci": "cancelled",
+    "invalid": true
+  }
+]
