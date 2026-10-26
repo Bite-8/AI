@@ -46,7 +46,9 @@ Mark2はHumanが用意した既存GPU EC2を再利用する。機械可読なsou
 
 未検証項目を推測で固定しない。次にHumanが対象、利用目的、費用上限、終了時刻を明示して有料startを承認したsessionで、`run-command inventory`を実行する。その出力が[`qwen35_9b_l4_profile.json`](../../mark2/configs/qwen35_9b_l4_profile.json)と一致するか確認し、不一致ならmodel/datasetを取得せず停止する。AMI nameとvolume構成は必要なread-only権限が付与された後に再取得する。
 
-Repository機能が許可する操作は固定targetの`status`、通常の`start`/`stop`、allowlist済みSSM Run Command、SSM Session Managerだけである。新規resource作成、terminate、reboot、強制stop、構成・権限変更、SSH fallbackは実装しない。各actionはEC2とSSMから返ったinstance IDを固定値と照合し、0件、複数件、ID不一致、terminated、不明・遷移中state、SSM未登録・offline、権限エラー、timeoutでfail closedする。別instance、別region、別接続方式へfallbackしない。
+Repository機能が許可する操作は固定targetの`status`、通常の`start`/`stop`、allowlist済みSSM Run Command、SSM Session Managerだけである。新規resource作成、terminate、reboot、強制stop、構成・権限変更、SSH fallbackは実装しない。各actionはEC2とSSMから返ったinstance IDを固定値と照合し、複数件、ID不一致、terminated、不明・遷移中state、SSM offline、権限エラー、timeoutでfail closedする。別instance、別region、別接続方式へfallbackしない。
+
+固定targetのEC2応答が検証済みの`stopped`である場合に限り、SSM managed-instance一覧の0件は停止中にrecordが掲載されない状態として受理する。このとき`status`と`stop`のJSONは`ssm.record_present`を`false`として返し、SSMのID、ping状態、agent情報を捏造しない。SSM API失敗、不正応答、複数件、ID不一致、またはEC2が`stopped`以外での0件は引き続きnon-zeroとなる。recordが存在する場合は`ssm.record_present`が`true`となる。`start`の完了、`run-command`、`session`にはEC2 `running`と固定targetのSSM `Online`の両方が必要であり、この停止時例外は実行可能状態を保証しない。
 
 `start`は課金を開始する。Humanが利用目的と時間上限を明示した後に限り、固定instance IDをconfirmationとして指定する。作業者はsession終了時に`stop`を実行し、続けて`status`で`stopped`を確認する責任を持つ。自動化やAI workflowはHumanの明示承認なしにstartしない。単価や上限は変わり得るため、過去の見積りを承認として流用しない。
 
@@ -138,7 +140,7 @@ python3 -m mark2.run run --backend mock --run-id mock-2
 python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 ```
 
-`status`はread-onlyだが、EC2とSSMの両方を検証できなければnon-zeroになる。
+`status`はread-onlyである。通常はEC2とSSMの両方を検証できなければnon-zeroになるが、検証済みEC2 stateが`stopped`かつ正常なSSM照会結果が0件の場合だけ成功し、`ssm.record_present: false`でrecord不在を明示する。
 
 ```bash
 python3 -m mark2.instance status
@@ -198,7 +200,7 @@ python3 -m mark2.run qualify \
 
 artifactはguest上の`artifacts/mark2/`でmanifestとhashを確認し、SSM session経由の承認済み転送方法で開発hostへ回収する。回収後に双方で`sha256sum`を計算し、一致を確認してからguest側copyの扱いを決める。command文字列へcredentialやsecretを含めず、stdout/stderrにも保存しない。
 
-終了時は必ず次を実行する。`stop`は通常停止だけを要求して最大10分待つ。`status`で`stopped`を確認できなければ、別操作で回復を試みずHumanへtargetと失敗段階を報告する。
+終了時は必ず次を実行する。`stop`は通常停止だけを要求して最大10分待つ。停止後にSSM recordが一覧から消えても、固定targetのEC2 `stopped`が検証できれば停止成功となる。`status`で`stopped`を確認できなければ、別操作で回復を試みずHumanへtargetと失敗段階を報告する。
 
 ```bash
 python3 -m mark2.instance stop

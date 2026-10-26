@@ -26,6 +26,10 @@ class CommandInvocationNotReady(InstanceError):
     """The newly sent SSM command is not visible to GetCommandInvocation yet."""
 
 
+class SsmTargetNotFound(InstanceError):
+    """A valid SSM lookup returned no managed-instance record for the fixed target."""
+
+
 def _exact_keys(value: Any, expected: set[str], label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != expected:
         raise ValueError(f"{label} must contain exactly: {', '.join(sorted(expected))}")
@@ -163,7 +167,13 @@ class AwsCliBackend:
                 "json",
             ]
         )
-        items = payload.get("InstanceInformationList", []) if isinstance(payload, dict) else []
+        if not isinstance(payload, dict) or "InstanceInformationList" not in payload:
+            raise InstanceError("SSM target lookup returned an invalid response")
+        items = payload["InstanceInformationList"]
+        if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+            raise InstanceError("SSM target lookup returned an invalid managed-instance list")
+        if not items:
+            raise SsmTargetNotFound("SSM target lookup returned no managed-instance record")
         if len(items) != 1:
             raise InstanceError(f"SSM target lookup returned {len(items)} managed instances; expected exactly one")
         item = items[0]
@@ -255,9 +265,18 @@ class InstanceController:
         state = ec2.get("state")
         if state not in EC2_STATES or state in {"terminated", "shutting-down"}:
             raise InstanceError(f"EC2 target has forbidden or unknown state: {state!r}")
-        ssm = self.backend.describe_ssm(self.instance_id)
+        try:
+            ssm = self.backend.describe_ssm(self.instance_id)
+        except SsmTargetNotFound:
+            if state != "stopped":
+                raise InstanceError(
+                    f"SSM target lookup returned no managed-instance record while EC2 state is {state!r}"
+                ) from None
+            ssm = {"record_present": False}
+            return {"region": self.config["region"], "ec2": ec2, "ssm": ssm}
         if ssm.get("instance_id") != self.instance_id:
             raise InstanceError("SSM response instance ID does not match the fixed target")
+        ssm = {**ssm, "record_present": True}
         return {"region": self.config["region"], "ec2": ec2, "ssm": ssm}
 
     @staticmethod

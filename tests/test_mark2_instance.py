@@ -13,9 +13,10 @@ def config():
 
 
 class FakeBackend:
-    def __init__(self, ec2_state="running", ping_status="Online"):
+    def __init__(self, ec2_state="running", ping_status="Online", ssm_present=True):
         self.ec2_state = ec2_state
         self.ping_status = ping_status
+        self.ssm_present = ssm_present
         self.calls = []
         self.command_status = "Success"
 
@@ -25,17 +26,20 @@ class FakeBackend:
 
     def describe_ssm(self, instance_id):
         self.calls.append(("describe_ssm", instance_id))
+        if not self.ssm_present:
+            raise instance.SsmTargetNotFound("no managed-instance record")
         return {"instance_id": instance_id, "ping_status": self.ping_status}
 
     def start(self, instance_id):
         self.calls.append(("start", instance_id))
         self.ec2_state = "running"
         self.ping_status = "Online"
+        self.ssm_present = True
 
     def stop(self, instance_id):
         self.calls.append(("stop", instance_id))
         self.ec2_state = "stopped"
-        self.ping_status = "ConnectionLost"
+        self.ssm_present = False
 
     def send_command(self, instance_id, commands, timeout):
         self.calls.append(("send_command", instance_id, commands, timeout))
@@ -81,7 +85,26 @@ class ControllerTests(unittest.TestCase):
         result = instance.InstanceController(config(), FakeBackend()).status()
         self.assertEqual(result["region"], "ap-northeast-1")
         self.assertEqual(result["ec2"]["state"], "running")
+        self.assertIs(result["ssm"]["record_present"], True)
         self.assertEqual(result["ssm"]["ping_status"], "Online")
+
+    def test_stopped_status_accepts_explicit_ssm_absence(self):
+        result = instance.InstanceController(config(), FakeBackend("stopped", ssm_present=False)).status()
+        self.assertEqual(result["ec2"]["state"], "stopped")
+        self.assertEqual(result["ssm"], {"record_present": False})
+
+    def test_ssm_absence_is_rejected_unless_ec2_is_stopped(self):
+        for state in ("pending", "running", "stopping"):
+            with self.subTest(state=state), self.assertRaisesRegex(
+                instance.InstanceError, f"no managed-instance record while EC2 state is '{state}'"
+            ):
+                instance.InstanceController(config(), FakeBackend(state, ssm_present=False)).status()
+
+    def test_stopped_status_does_not_hide_other_ssm_failures(self):
+        backend = FakeBackend("stopped")
+        backend.describe_ssm = lambda unused: (_ for _ in ()).throw(instance.InstanceError("AccessDenied"))
+        with self.assertRaisesRegex(instance.InstanceError, "AccessDenied"):
+            instance.InstanceController(config(), backend).status()
 
     def test_mismatched_instance_id_stops_before_action(self):
         backend = FakeBackend()
@@ -106,16 +129,24 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(backend.calls, [])
 
     def test_start_and_stop_normal_paths(self):
-        backend = FakeBackend("stopped", "ConnectionLost")
+        backend = FakeBackend("stopped", ssm_present=False)
         controller = instance.InstanceController(config(), backend, sleep=lambda unused: None)
         observed = []
         started = controller.start(config()["instance_id"], before_start=observed.append)
         self.assertEqual(started["ec2"]["state"], "running")
         self.assertEqual(observed[0]["ec2"]["state"], "stopped")
+        self.assertEqual(observed[0]["ssm"], {"record_present": False})
         stopped = controller.stop()
         self.assertEqual(stopped["ec2"]["state"], "stopped")
+        self.assertEqual(stopped["ssm"], {"record_present": False})
         self.assertEqual([call[0] for call in backend.calls].count("start"), 1)
         self.assertEqual([call[0] for call in backend.calls].count("stop"), 1)
+
+    def test_stop_is_idempotent_without_ssm_record(self):
+        backend = FakeBackend("stopped", ssm_present=False)
+        result = instance.InstanceController(config(), backend).stop()
+        self.assertEqual(result["ssm"], {"record_present": False})
+        self.assertNotIn("stop", [call[0] for call in backend.calls])
 
     def test_timeout_is_finite(self):
         value = deepcopy(config())
@@ -216,6 +247,22 @@ class AwsCliBackendTests(unittest.TestCase):
         parameter = args[args.index("--parameters") + 1]
         self.assertEqual(json.loads(parameter), {"commands": ["uname -r", "python3 --version"]})
         self.assertNotIn("shell", kwargs)
+
+    def test_ssm_lookup_distinguishes_absence_from_invalid_or_multiple_results(self):
+        cases = (
+            ({"InstanceInformationList": []}, instance.SsmTargetNotFound, "no managed-instance record"),
+            ({"InstanceInformationList": [{}, {}]}, instance.InstanceError, "expected exactly one"),
+            ({}, instance.InstanceError, "invalid response"),
+            ({"InstanceInformationList": None}, instance.InstanceError, "invalid managed-instance list"),
+        )
+        for payload, error_type, message in cases:
+            with self.subTest(payload=payload):
+                def runner(args, **kwargs):
+                    return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+                backend = instance.AwsCliBackend("ap-northeast-1", "i-fixed", runner=runner)
+                with self.assertRaisesRegex(error_type, message):
+                    backend.describe_ssm("i-fixed")
 
     def test_command_result_classifies_eventual_consistency_only(self):
         errors = (
