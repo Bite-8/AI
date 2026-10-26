@@ -17,9 +17,10 @@ Subagentのmodelとreasoning effortはMain Agentから継承する。同時に�
 - **Codexの正式なSubagentを使う:** WorkとReviewを単なるprompt fileや別々のtop-level sessionにせず、`.codex/agents/*.toml`で定義する。Mainのrouting責務を薄く保ちつつ、実装とレビューのcontextを分離するためである。
 - **1起動で1工程だけ進める:** MainはWorkまたはReviewを1つだけspawnして終了する。長いworkflowを1 sessionで完走させず、各回でGitHubの最新状態を読み直せるようにする。GitHub上のworkflow件数には上限を設けないが、同時Subagent数は1とする。
 - **価値選択後にIssueを細分化する:** Workは`GOAL.md`との差分から最も価値の高い課題を先に選び、その後で依存順の、独立して実装・検証・merge可能な単位へ分解する。単純な最小化は行わず、意味のある改善を残しながら1回のPR Reviewで直接検証できる最初の単位だけをIssue化する。後続候補は先行作業の完了後に再評価し、Sub-issue化は必須としない。
-- **labelだけを状態のsource of truthにする:** 構造化コメントや外部databaseは導入しない。コメントは判断理由と修正指示に使い、Mainは解析しない。初期運用で必要性が確認されるまで状態管理を増やさないためである。
+- **labelだけを状態のsource of truthにする:** 構造化コメントや外部databaseは導入しない。コメントは判断理由と修正指示、実行可能性の判断材料に使うが、workflow状態はlabelだけから決める。初期運用で必要性が確認されるまで状態管理を増やさないためである。
 - **Humanがurgent queueを明示する:** `priority:urgent`はHumanが通常queueへの割り込みを指示するためだけに使う。Agentはurgencyを新規判断せず、urgent Issueから作るPRへ既存labelを引き継ぐ場合に限って付与する。urgentでもReview、CI、安全停止条件を省略しない。
-- **Human Escalationをapproval gateにしない:** Issue Review通過後は実装へ進み、PR Review通過後は直ちにmergeを試みる。通常のHuman reviewはGitHubのCODEOWNERSとbranch protectionで管理する。一方、Agentの権限・責任外の具体的blockerは、元の状態をresume metadataで保持するHuman Escalationとして保留・検証する。エスカレーションの投稿や対応通知自体は承認ではない。
+- **独自のHuman Gateを追加しない:** Issue Review通過後は実装へ進み、PR Review通過後は直ちにmergeを試みる。保護が必要なpathはGitHubのCODEOWNERSとbranch protectionで管理し、GitHubがrequired reviewを要求した場合だけ`ai:human-review`として待つ。
+- **実行可能な作業を自律的に選ぶ:** Agentは`GOAL.md`、Repository、依存関係、権限、resource、代替手段から現在の実行可能性を判断する。1件が進められないときはそれをskipし、他の実行可能な候補を探す。
 - **merge commit後にremote branchを削除する:** 現在のRepository履歴に合わせてmerge commit方式を使い、merge済みbranchは残さない。
 - **UTCの固定時刻に1日2回起動する:** `OnCalendar`にtimezoneを含め、hostのlocal timezoneや前回の終了時刻に左右されず毎日00:00と12:00 UTCに起動する。`Persistent=false`によりhost停止中に逃した定刻分は起動時にcatch-upせず、次の定刻まで待つ。固定時刻以外の追加activationは設定しない。
 - **system serviceとして動かす:** user sessionやloginに依存させず、systemdのoneshot serviceを`User=ssm-user`で実行する。systemdと`flock`の両方で二重起動を防ぐ。
@@ -36,37 +37,16 @@ Subagentのmodelとreasoning effortはMain Agentから継承する。同時に�
 | `ai:changes-requested` | 対象がIssueなら本文、PRなら実装をWork Agentが修正 |
 | `ai:pr-review` | CI成功後にReview AgentがPRをレビュー |
 | `ai:human-review` | GitHub上のrequired Human review待ち |
-| `ai:human-action-required` | 具体的な依頼を投稿済み。自動routingから除外してHuman対応を待つ |
-| `ai:human-action-ready` | Human対応完了の通知後。Work Agentの`verify_escalation`へrouteする |
-| `ai:human-action-cancelled` | Humanが依頼を撤回。明示指示まで自動再開しない |
 
-AI PR Reviewが通過した場合はmerge commit方式で直ちにmergeし、remote branchを削除する。GitHubがrequired review不足を返した場合だけ`ai:human-review`へ移る。これはAgentの権限不足や外部判断を扱うHuman Escalationとは別の状態である。
+AI PR Reviewが通過した場合はmerge commit方式で直ちにmergeし、remote branchを削除する。独自のHuman Gateは追加せず、GitHubがrequired review不足を返した場合だけ`ai:human-review`へ移る。
 
-Human Escalationの3状態はactive AI状態labelである。エスカレーション中は次のresume metadata labelを正確に1つ併用し、コメント解析なしで復帰先を決める。
+Mainはlabelからworkflow状態を決めたうえで、`GOAL.md`、現在のRepository、Issue/PRの内容と依存関係、利用できる権限とresourceから候補の実行可能性を判断する。実行できない候補は状態labelを維持したままskipし、次の候補を調べる。コメントは事実や判断理由の記録に使うが、workflow状態のsource of truthにはしない。
 
-| Resume metadata | 検証成功後の復帰先 |
-|---|---|
-| `ai:resume-issue-review` | `ai:issue-review` |
-| `ai:resume-issue-approved` | `ai:issue-approved` |
-| `ai:resume-changes-requested` | Issue/PR種別に応じた`ai:changes-requested` |
-| `ai:resume-pr-review` | `ai:pr-review` |
+WorkとReviewは問題に遭遇したとき、調査継続、Scope内の代替手段、方針修正、現在の対象の保留を、Goalへの寄与と現在の状況から判断する。固定的なblocker分類や一律の試行回数・時間制限は使わない。実行できない操作や未解決事項が残る場合は、必要に応じて観測事実、試行内容、判断理由、残る課題をIssueまたはPRに記録する。
 
-### Human Escalation protocol
+credential、token、secret、不要なaccount ID・network詳細・機密出力はコメントやfixtureに保存しない。IAM変更、有料resourceの作成・起動、購入、本番変更はAgentが自動実行しない。
 
-WorkまたはReview Agentが安全に継続できない1件のHuman blockerを確認したとき、次の順で扱う。
-
-1. Agentは観測事実、失敗した操作とsecretを除くエラー種別、Humanに求める具体的な操作または判断、必要最小scope、費用・security・運用・停止責任への影響、実行しなかった操作、検証手順と成功条件、復元状態をコメントする。
-2. 現在のactive状態を対応するresume metadataと`ai:human-action-required`へ置き換える。Mainは待機中の対象をrouteしないため、依頼は定期実行ごとに反復されない。
-3. Humanは実施内容または判断とscope差異をコメントし、requiredを`ai:human-action-ready`へ置き換える。コメントだけでは状態は変わらない。
-4. Mainはready状態をWork Agentの`verify_escalation`へrouteする。Workはread-onlyまたは明示承認範囲だけで、依頼に記載された検証を1回行う。
-5. 成功時はreadyとresume metadataを除去して元のactive状態を復元する。失敗時は失敗事実と次の依頼をコメントし、resume metadataと`priority:urgent`を保持したままrequiredへ戻す。
-6. Humanが撤回する場合は結果をコメントして`ai:human-action-cancelled`へ移す。resume metadataは保持するが自動復帰しない。
-
-例えば、urgentなIssueの実装中に権限不足が確定した場合、`ai:issue-approved` + `priority:urgent`は`ai:human-action-required` + `ai:resume-issue-approved` + `priority:urgent`になる。Humanが対応を通知してreadyへ変更するとWorkが検証し、成功した場合だけ`ai:issue-approved` + `priority:urgent`へ戻る。PR review中なら`ai:resume-pr-review`を使うが、required review用の`ai:human-review`は使わない。
-
-active状態が複数、resume metadataが欠落・複数・対象種別と矛盾、通常状態にresume metadataが残存、Human入力が曖昧、実行直前にlabelが変化、検証不能、またはscope超過が必要な場合は何も変更せず停止する。credential、token、secret、不要なaccount ID・network詳細・機密出力はコメントやfixtureに保存しない。IAM変更、有料resourceの作成・起動、購入、本番変更はAgentが自動実行しない。
-
-`priority:urgent`は上表の状態とは独立した優先度labelである。Humanだけが新たなurgencyを指定できる。Mainはまず`priority:urgent`とAI状態labelの両方を持つ実行可能な対象へ通常の状態優先順位を適用し、該当がなければ通常queueを処理する。Human Escalationの全遷移でも既存値を保持する。タイトルの`[Hot]`やauthor種別は優先度判定に使用しない。
+`priority:urgent`は上表の状態とは独立した優先度labelである。Humanだけが新たなurgencyを指定できる。Mainはまず`priority:urgent`とAI状態labelの両方を持つ実行可能な対象へ通常の状態優先順位を適用し、該当がなければ通常queueを処理する。タイトルの`[Hot]`やauthor種別は優先度判定に使用しない。
 
 例として、通常PRが`ai:changes-requested`であっても、`priority:urgent`と`ai:issue-review`を持つIssueがあればurgent Issueを先にレビューする。これはqueueの順序だけを変更し、Issue ReviewやPR Reviewを迂回しない。
 
@@ -133,7 +113,7 @@ sudo systemctl disable --now ai-development.timer
 
 ## 契約の検証
 
-`.github/ai-workflow-labels.json`はHuman Escalation用labelの種類とGitHub上の説明を定義する。`scripts/ai_workflow_contract.py`はactive/resumeの整合、routing、成功復帰、再保留、撤回、urgent維持、invalid状態を`tests/fixtures/ai_workflow_transitions.json`に対して実行し、Main/Work/Review/documentationが同じlabel集合を持つことも検証する。
+`.github/ai-workflow-labels.json`はworkflowに残る状態labelと優先度labelを定義する。`scripts/ai_workflow_contract.py`は対象種別とactive状態の整合、通常routing、urgentによる非迂回、実行不能な候補のskipを`tests/fixtures/ai_workflow_routing.json`に対して検証し、Main/Work/Review/documentationが同じlabel集合を持つことも確認する。
 
 ```bash
 python3 scripts/ai_workflow_contract.py

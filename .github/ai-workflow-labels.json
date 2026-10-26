@@ -1,37 +1,38 @@
 {
-  "ai:human-action-required": {
+  "ai:issue-review": {
     "kind": "active",
+    "object_types": ["issue"],
+    "color": "D4C5F9",
+    "description": "AI Issue Review待ち"
+  },
+  "ai:issue-approved": {
+    "kind": "active",
+    "object_types": ["issue"],
+    "color": "0E8A16",
+    "description": "AI Issue Review済み・実装可能"
+  },
+  "ai:changes-requested": {
+    "kind": "active",
+    "object_types": ["issue", "pr"],
     "color": "D93F0B",
-    "description": "Human action requested; excluded from automatic routing"
+    "description": "Work Agentによる修正待ち"
   },
-  "ai:human-action-ready": {
+  "ai:pr-review": {
     "kind": "active",
+    "object_types": ["pr"],
+    "color": "1D76DB",
+    "description": "AI PR Review待ち"
+  },
+  "ai:human-review": {
+    "kind": "active",
+    "object_types": ["pr"],
     "color": "FBCA04",
-    "description": "Human action reported complete; Work verification pending"
+    "description": "GitHub required Human review待ち"
   },
-  "ai:human-action-cancelled": {
-    "kind": "active",
-    "color": "6E7781",
-    "description": "Human request cancelled; no automatic resume"
-  },
-  "ai:resume-issue-review": {
-    "kind": "resume-metadata",
-    "color": "C5DEF5",
-    "description": "Resume metadata: restore ai:issue-review after verification"
-  },
-  "ai:resume-issue-approved": {
-    "kind": "resume-metadata",
-    "color": "C5DEF5",
-    "description": "Resume metadata: restore ai:issue-approved after verification"
-  },
-  "ai:resume-changes-requested": {
-    "kind": "resume-metadata",
-    "color": "C5DEF5",
-    "description": "Resume metadata: restore ai:changes-requested after verification"
-  },
-  "ai:resume-pr-review": {
-    "kind": "resume-metadata",
-    "color": "C5DEF5",
-    "description": "Resume metadata: restore ai:pr-review after verification"
+  "priority:urgent": {
+    "kind": "priority",
+    "object_types": ["issue", "pr"],
+    "color": "D93F0B",
+    "description": "Human-designated queue priority. Does not bypass review, CI, or safety gates."
   }
 }
