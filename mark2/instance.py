@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import re
 import subprocess
@@ -16,6 +17,7 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG = PACKAGE_DIR / "configs" / "gpu_instance.json"
 EC2_STATES = {"pending", "running", "shutting-down", "terminated", "stopping", "stopped"}
 TERMINAL_COMMAND_STATES = {"Success", "Cancelled", "TimedOut", "Failed", "Cancelling"}
+COMMAND_STATES = TERMINAL_COMMAND_STATES | {"Pending", "InProgress", "Delayed"}
 
 
 class InstanceError(RuntimeError):
@@ -73,21 +75,187 @@ def _redact(message: str) -> str:
     message = re.sub(r"arn:aws(?:-[a-z]+)?:[^\s]+", "[redacted-arn]", message)
     message = re.sub(r"(?<!\d)\d{12}(?!\d)", "[redacted-account]", message)
     message = re.sub(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b", "[redacted-access-key]", message)
+    message = re.sub(
+        r"(?i)\b(?:access[_ -]?key|secret|session[_ -]?token|credential|password)\b\s*[:=]\s*\S+",
+        "[redacted-credential]",
+        message,
+    )
+    message = re.sub(r"https?://[^\s]+", "[redacted-endpoint]", message)
     return message.strip()
 
 
+def _default_ssm_client(region: str) -> Any:
+    """Build the pinned-region SDK client without making an AWS API request."""
+    boto3 = importlib.import_module("boto3")
+    botocore_config = importlib.import_module("botocore.config")
+    return boto3.client(
+        "ssm",
+        region_name=region,
+        config=botocore_config.Config(
+            connect_timeout=10,
+            read_timeout=30,
+            retries={"total_max_attempts": 3, "mode": "standard"},
+        ),
+    )
+
+
+class SsmRunCommandTransport:
+    """Boto3 boundary for the two fixed-target SSM Run Command APIs."""
+
+    def __init__(
+        self,
+        region: str,
+        instance_id: str,
+        allowed_commands: dict[str, list[str]],
+        command_timeout: int,
+        client_factory: Callable[[str], Any] = _default_ssm_client,
+    ) -> None:
+        self.region = region
+        self.instance_id = instance_id
+        self.allowed_commands = {name: list(lines) for name, lines in allowed_commands.items()}
+        self.command_timeout = command_timeout
+        self.client_factory = client_factory
+        self._sdk_client: Any | None = None
+
+    def _target(self, instance_id: str) -> None:
+        if instance_id != self.instance_id:
+            raise InstanceError("SSM SDK refused an instance ID other than the fixed target")
+
+    def _client(self) -> Any:
+        if self._sdk_client is None:
+            try:
+                client = self.client_factory(self.region)
+            except Exception as exc:
+                raise InstanceError(
+                    f"SSM SDK client construction failed for fixed region {self.region}: {type(exc).__name__}"
+                ) from exc
+            actual_region = getattr(getattr(client, "meta", None), "region_name", None)
+            if actual_region != self.region:
+                raise InstanceError("SSM SDK client region does not match the fixed region")
+            if not callable(getattr(client, "send_command", None)) or not callable(
+                getattr(client, "get_command_invocation", None)
+            ):
+                raise InstanceError("SSM SDK client does not provide the required Run Command APIs")
+            self._sdk_client = client
+        return self._sdk_client
+
+    @staticmethod
+    def _error_code(exc: Exception) -> str | None:
+        response = getattr(exc, "response", None)
+        error = response.get("Error") if isinstance(response, dict) else None
+        code = error.get("Code") if isinstance(error, dict) else None
+        if isinstance(code, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,79}", code):
+            return code
+        return None
+
+    def _call(self, operation: str, **request: Any) -> dict[str, Any]:
+        try:
+            payload = getattr(self._client(), operation)(**request)
+        except Exception as exc:
+            code = self._error_code(exc)
+            if operation == "get_command_invocation" and code == "InvocationDoesNotExist":
+                raise CommandInvocationNotReady(
+                    "SSM command invocation is not visible yet for the fixed target"
+                ) from exc
+            reason = code or type(exc).__name__
+            raise InstanceError(
+                f"SSM SDK {operation} failed for fixed target {self.instance_id}: {_redact(reason)}"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise InstanceError(f"SSM SDK {operation} returned an invalid response")
+        return payload
+
+    def check(self, instance_id: str, commands: dict[str, list[str]], timeout: int) -> dict[str, Any]:
+        self._target(instance_id)
+        if commands != self.allowed_commands or not commands or not all(
+            isinstance(name, str)
+            and isinstance(lines, list)
+            and lines
+            and all(isinstance(line, str) and line for line in lines)
+            for name, lines in commands.items()
+        ):
+            raise InstanceError("SSM Run Command allowlist is invalid")
+        if type(timeout) is not int or timeout != self.command_timeout or timeout <= 0:
+            raise InstanceError("SSM Run Command timeout does not match the fixed timeout")
+        self._client()
+        return {
+            "transport": "boto3",
+            "region": self.region,
+            "instance_id": self.instance_id,
+            "document_name": "AWS-RunShellScript",
+            "commands": sorted(commands),
+            "timeout_seconds": timeout,
+            "api_mutation": False,
+        }
+
+    def send_command(self, instance_id: str, commands: list[str], timeout: int) -> str:
+        self._target(instance_id)
+        if commands not in self.allowed_commands.values():
+            raise InstanceError("SSM SDK refused commands outside the repository allowlist")
+        if type(timeout) is not int or timeout != self.command_timeout:
+            raise InstanceError("SSM SDK refused a timeout other than the fixed timeout")
+        payload = self._call(
+            "send_command",
+            InstanceIds=[self.instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": list(commands)},
+            TimeoutSeconds=timeout,
+        )
+        command = payload.get("Command")
+        command_id = command.get("CommandId") if isinstance(command, dict) else None
+        if not isinstance(command_id, str) or not command_id:
+            raise InstanceError("SSM SDK send_command did not return a command ID")
+        return command_id
+
+    def command_result(self, instance_id: str, command_id: str) -> dict[str, Any]:
+        self._target(instance_id)
+        payload = self._call(
+            "get_command_invocation",
+            InstanceId=self.instance_id,
+            CommandId=command_id,
+        )
+        if payload.get("CommandId") != command_id or payload.get("InstanceId") != self.instance_id:
+            raise InstanceError("SSM SDK get_command_invocation returned a mismatched target or command ID")
+        status = payload.get("Status")
+        response_code = payload.get("ResponseCode")
+        stdout = payload.get("StandardOutputContent")
+        stderr = payload.get("StandardErrorContent")
+        if status not in COMMAND_STATES:
+            raise InstanceError("SSM SDK get_command_invocation returned an unknown status")
+        if type(response_code) is not int:
+            raise InstanceError("SSM SDK get_command_invocation returned an invalid response code")
+        if not isinstance(stdout, str) or not isinstance(stderr, str):
+            raise InstanceError("SSM SDK get_command_invocation returned invalid output fields")
+        return {
+            "command_id": command_id,
+            "status": status,
+            "response_code": response_code,
+            "stdout": stdout,
+            "stderr": stderr,
+        }
+
+
 class AwsCliBackend:
-    """AWS process boundary; tests replace this class or its runner."""
+    """Fixed-target AWS boundary; Run Command uses SDK, other operations keep the CLI."""
 
     def __init__(
         self,
         region: str,
         instance_id: str,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        run_commands: dict[str, list[str]] | None = None,
+        command_timeout: int = 0,
+        run_command_transport: SsmRunCommandTransport | None = None,
     ) -> None:
         self.region = region
         self.instance_id = instance_id
         self.runner = runner
+        self.run_command_transport = run_command_transport or SsmRunCommandTransport(
+            region,
+            instance_id,
+            run_commands or {},
+            command_timeout,
+        )
 
     def _target(self, instance_id: str) -> None:
         if instance_id != self.instance_id:
@@ -195,49 +363,18 @@ class AwsCliBackend:
         self._run(["ec2", "stop-instances", "--instance-ids", instance_id, "--output", "json"])
 
     def send_command(self, instance_id: str, commands: list[str], timeout: int) -> str:
-        self._target(instance_id)
-        payload = self._run(
-            [
-                "ssm",
-                "send-command",
-                "--instance-ids",
-                instance_id,
-                "--document-name",
-                "AWS-RunShellScript",
-                "--parameters",
-                json.dumps({"commands": commands}, separators=(",", ":")),
-                "--timeout-seconds",
-                str(timeout),
-                "--output",
-                "json",
-            ]
-        )
-        command_id = (payload.get("Command") or {}).get("CommandId") if isinstance(payload, dict) else None
-        if not isinstance(command_id, str) or not command_id:
-            raise InstanceError("SSM send-command did not return a command ID")
-        return command_id
+        return self.run_command_transport.send_command(instance_id, commands, timeout)
 
     def command_result(self, instance_id: str, command_id: str) -> dict[str, Any]:
-        self._target(instance_id)
-        payload = self._run(
-            [
-                "ssm",
-                "get-command-invocation",
-                "--instance-id",
-                instance_id,
-                "--command-id",
-                command_id,
-                "--output",
-                "json",
-            ]
-        )
-        return {
-            "command_id": command_id,
-            "status": payload.get("Status"),
-            "response_code": payload.get("ResponseCode"),
-            "stdout": payload.get("StandardOutputContent", ""),
-            "stderr": payload.get("StandardErrorContent", ""),
-        }
+        return self.run_command_transport.command_result(instance_id, command_id)
+
+    def check_run_command(
+        self,
+        instance_id: str,
+        commands: dict[str, list[str]],
+        timeout: int,
+    ) -> dict[str, Any]:
+        return self.run_command_transport.check(instance_id, commands, timeout)
 
     def session(self, instance_id: str) -> None:
         self._target(instance_id)
@@ -350,6 +487,8 @@ class InstanceController:
                 self.sleep(self.config["timeouts"]["poll_seconds"])
                 continue
             status = result.get("status")
+            if status not in COMMAND_STATES:
+                raise InstanceError("SSM Run Command returned an unknown status")
             if status in TERMINAL_COMMAND_STATES:
                 if status != "Success" or result.get("response_code") != 0:
                     raise InstanceError(
@@ -360,6 +499,13 @@ class InstanceController:
             if self.monotonic() >= deadline:
                 raise InstanceError(f"SSM Run Command {command_id} timed out after {timeout} seconds")
             self.sleep(self.config["timeouts"]["poll_seconds"])
+
+    def check_run_command(self) -> dict[str, Any]:
+        return self.backend.check_run_command(
+            self.instance_id,
+            self.config["run_commands"],
+            self.config["timeouts"]["command_seconds"],
+        )
 
     def session(self) -> None:
         snapshot = self.inspect()
@@ -378,6 +524,10 @@ def build_parser(config: dict[str, Any]) -> argparse.ArgumentParser:
     actions.add_parser("stop", help="normally stop the running fixed target")
     command = actions.add_parser("run-command", help="run one repository-defined SSM command")
     command.add_argument("name", choices=sorted(config["run_commands"]))
+    actions.add_parser(
+        "check-run-command",
+        help="validate the fixed SDK Run Command transport without an AWS API mutation",
+    )
     actions.add_parser("session", help="open an SSM Session Manager session (no SSH fallback)")
     return parser
 
@@ -386,7 +536,15 @@ def main() -> int:
     try:
         config = read_instance_config()
         args = build_parser(config).parse_args()
-        controller = InstanceController(config, AwsCliBackend(config["region"], config["instance_id"]))
+        controller = InstanceController(
+            config,
+            AwsCliBackend(
+                config["region"],
+                config["instance_id"],
+                run_commands=config["run_commands"],
+                command_timeout=config["timeouts"]["command_seconds"],
+            ),
+        )
         if args.action == "status":
             result = controller.status()
         elif args.action == "start":
@@ -403,6 +561,8 @@ def main() -> int:
             result = controller.stop()
         elif args.action == "run-command":
             result = controller.run_command(args.name)
+        elif args.action == "check-run-command":
+            result = controller.check_run_command()
         else:
             controller.session()
             result = {"region": config["region"], "instance_id": config["instance_id"], "session": "ended"}

@@ -178,6 +178,8 @@ class FakeProbe:
             "python_version": [3, 10, 14],
             "packages": {
                 "accelerate": "1.15.0",
+                "boto3": "1.40.72",
+                "botocore": "1.40.72",
                 "datasets": "5.0.1",
                 "safetensors": "0.8.0",
                 "torch": "2.14.0",
