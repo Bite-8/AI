@@ -14,7 +14,15 @@ from pathlib import Path
 from typing import Any
 
 
-PACKAGE_NAMES = ("torch", "transformers", "datasets", "accelerate", "safetensors")
+PACKAGE_NAMES = (
+    "torch",
+    "transformers",
+    "datasets",
+    "accelerate",
+    "safetensors",
+    "boto3",
+    "botocore",
+)
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 

@@ -52,7 +52,7 @@ Repositoryが現在実装するAWS操作は、固定targetの`status`、通常�
 
 `start`は課金を開始する。固定instanceにはHumanがRepository外で管理する、起動から4時間後の強制停止機構がある。作業者はread-onlyで確認可能なら開始前にその有効性を確認し、確認手段がなければその事実をIssueへ記録して作業を続ける。この外部guardrailに依存してinstanceを放置せず、session終了時には通常の`stop`を実行し、続けて`status`で`stopped`を確認する責任を持つ。
 
-必要な実行権限は固定targetに対するEC2状態参照・start・通常stopと、SSM managed-instance参照・Run Command・Session Managerである。AWS CLIとSession Manager pluginが利用可能でなければ停止する。SSH用inbound ruleや永続keyは不要である。
+必要な実行権限は固定targetに対するEC2状態参照・start・通常stopと、SSM managed-instance参照・Run Command・Session Managerである。EC2操作、SSM managed-instance照会、Session ManagerはAWS CLIを使い、Run Commandの`SendCommand` / `GetCommandInvocation`だけは`mark2/requirements.txt`で固定したBoto3/Botocore clientを使う。SDK clientは東京region、固定target、`AWS-RunShellScript`、Repository allowlist、15分timeoutに閉じ、標準retryを初回を含む合計最大3回、接続10秒・read 30秒に制限する。別transportへfallbackしない。AWS CLI、固定済みSDK依存、Session Manager pluginが利用可能でなければ停止する。SSH用inbound ruleや永続keyは不要である。
 
 ## 固定する評価条件
 
@@ -134,6 +134,7 @@ Repositoryと固定target configの無料の事前検査:
 python3 -m mark2.run check-config
 python3 -m mark2.run check-experiment-contract
 python3 -m mark2.instance --help
+python3 -m mark2.instance check-run-command
 python3 -m unittest discover -s tests -v
 python3 -m mark2.run run --backend mock --run-id mock-1
 python3 -m mark2.run run --backend mock --run-id mock-2
@@ -142,6 +143,8 @@ python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 
 `status`はread-onlyである。通常はEC2とSSMの両方を検証できなければnon-zeroになるが、検証済みEC2 stateが`stopped`かつ正常なSSM照会結果が0件の場合だけ成功し、`ssm.record_present: false`でrecord不在を明示する。
 
+`check-run-command`はBoto3/Botocoreのimport、SSM client構築、固定region・target、Repository allowlist、timeoutを検査する。`SendCommand`、`GetCommandInvocation`を含むAWS APIは呼ばず、instanceを起動する前に実行する。SDK依存やclient構築に問題があればnon-zeroで停止する。この検査はRun Command transportだけを対象とし、AWS CLIを使い続けるEC2状態操作、SSM Online照会、Session Managerを置き換えない。
+
 ```bash
 python3 -m mark2.instance status
 ```
@@ -149,13 +152,14 @@ python3 -m mark2.instance status
 対象とpreliminary qualificationの目的を確認してから、次を実行する。confirmationは課金開始の誤操作を防ぐため固定instance IDと完全一致させる。`start`はEC2がrunningかつSSM Onlineになるまで最大10分だけ待つ。
 
 ```bash
+python3 -m mark2.instance check-run-command
 python3 -m mark2.instance start \
   --confirm-start i-0fb8c2572680019af
 python3 -m mark2.instance run-command inventory
 python3 -m mark2.instance session
 ```
 
-Run CommandはRepositoryに固定された`inventory`だけを受け付け、任意shell文字列をCLI引数から組み立てない。command ID、最終status、stdout、stderrを表示し、失敗または15分timeoutでnon-zeroになる。session開始失敗時もSSHへfallbackしない。
+Run CommandはRepositoryに固定された`inventory`だけをBoto3/Botocore経由で受け付け、任意shell文字列をCLI引数から組み立てない。command ID、最終status、stdout、stderrを表示し、`InvocationDoesNotExist`だけをbounded pollingし、その他のAPI/credential/timeout/不正応答または全体の15分timeoutでnon-zeroになる。session開始失敗時もSSHへfallbackしない。Issue #30の実機baseline再試行はこのtransport修正には含まず、原因を反映した別Issueで行う。
 
 inventoryが承認済みprofileと一致した後、Python 3.10以上の隔離環境と `mark2/requirements.txt` の固定依存を使う。承認されたcommit SHAを記録し、modelまたはdatasetを取得する前にhost preflightを実行する。
 

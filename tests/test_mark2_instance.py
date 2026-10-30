@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 from mark2 import instance
 
@@ -54,6 +55,10 @@ class FakeBackend:
             "stdout": "ok",
             "stderr": "",
         }
+
+    def check_run_command(self, instance_id, commands, timeout):
+        self.calls.append(("check_run_command", instance_id, commands, timeout))
+        return {"transport": "fake", "api_mutation": False}
 
     def session(self, instance_id):
         self.calls.append(("session", instance_id))
@@ -210,6 +215,28 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(instance.InstanceError, "timed out after 1 seconds"):
             controller.run_command("inventory")
 
+    def test_run_command_rejects_unknown_status_without_polling(self):
+        backend = FakeBackend()
+        backend.command_status = "FutureStatus"
+        with self.assertRaisesRegex(instance.InstanceError, "unknown status"):
+            instance.InstanceController(config(), backend).run_command("inventory")
+
+    def test_check_run_command_does_not_inspect_or_mutate_the_target(self):
+        backend = FakeBackend()
+        result = instance.InstanceController(config(), backend).check_run_command()
+        self.assertEqual(result, {"transport": "fake", "api_mutation": False})
+        self.assertEqual(
+            backend.calls,
+            [
+                (
+                    "check_run_command",
+                    config()["instance_id"],
+                    config()["run_commands"],
+                    config()["timeouts"]["command_seconds"],
+                )
+            ],
+        )
+
     def test_session_requires_running_online_target(self):
         backend = FakeBackend()
         instance.InstanceController(config(), backend).session()
@@ -234,19 +261,27 @@ class AwsCliBackendTests(unittest.TestCase):
                 with self.assertRaisesRegex(instance.InstanceError, "expected exactly one"):
                     backend.describe_ec2("i-fixed")
 
-    def test_send_command_passes_json_as_one_argument_without_shell(self):
-        calls = []
+    def test_run_command_delegates_to_sdk_without_aws_cli(self):
+        class Transport:
+            def send_command(self, instance_id, commands, timeout):
+                self.request = (instance_id, commands, timeout)
+                return "abc"
 
-        def runner(args, **kwargs):
-            calls.append((args, kwargs))
-            return subprocess.CompletedProcess(args, 0, json.dumps({"Command": {"CommandId": "abc"}}), "")
+            def command_result(self, instance_id, command_id):
+                self.result_request = (instance_id, command_id)
+                return {"command_id": command_id, "status": "Success", "response_code": 0}
 
-        backend = instance.AwsCliBackend("ap-northeast-1", "i-fixed", runner=runner)
-        self.assertEqual(backend.send_command("i-fixed", ["uname -r", "python3 --version"], 30), "abc")
-        args, kwargs = calls[0]
-        parameter = args[args.index("--parameters") + 1]
-        self.assertEqual(json.loads(parameter), {"commands": ["uname -r", "python3 --version"]})
-        self.assertNotIn("shell", kwargs)
+        transport = Transport()
+        backend = instance.AwsCliBackend(
+            "ap-northeast-1",
+            "i-fixed",
+            runner=lambda *args, **kwargs: self.fail("AWS CLI must not run"),
+            run_command_transport=transport,
+        )
+        self.assertEqual(backend.send_command("i-fixed", ["uname -r"], 30), "abc")
+        self.assertEqual(backend.command_result("i-fixed", "abc")["status"], "Success")
+        self.assertEqual(transport.request, ("i-fixed", ["uname -r"], 30))
+        self.assertEqual(transport.result_request, ("i-fixed", "abc"))
 
     def test_ssm_lookup_distinguishes_absence_from_invalid_or_multiple_results(self):
         cases = (
@@ -264,23 +299,6 @@ class AwsCliBackendTests(unittest.TestCase):
                 with self.assertRaisesRegex(error_type, message):
                     backend.describe_ssm("i-fixed")
 
-    def test_command_result_classifies_eventual_consistency_only(self):
-        errors = (
-            ("InvocationDoesNotExist", instance.CommandInvocationNotReady),
-            ("AccessDeniedException", instance.InstanceError),
-        )
-        for code, expected_error in errors:
-            with self.subTest(code=code):
-                def runner(args, **kwargs):
-                    detail = f"An error occurred ({code}) when calling the GetCommandInvocation operation"
-                    return subprocess.CompletedProcess(args, 255, "", detail)
-
-                backend = instance.AwsCliBackend("ap-northeast-1", "i-fixed", runner=runner)
-                with self.assertRaises(expected_error) as raised:
-                    backend.command_result("i-fixed", "command-1")
-                if code != "InvocationDoesNotExist":
-                    self.assertNotIsInstance(raised.exception, instance.CommandInvocationNotReady)
-
     def test_permission_error_is_sanitized(self):
         def runner(args, **kwargs):
             return subprocess.CompletedProcess(args, 255, "", "AccessDenied for arn:aws:iam::123456789012:role/test")
@@ -288,6 +306,171 @@ class AwsCliBackendTests(unittest.TestCase):
         backend = instance.AwsCliBackend("ap-northeast-1", "i-fixed", runner=runner)
         with self.assertRaisesRegex(instance.InstanceError, r"\[redacted-arn\]"):
             backend.describe_ssm("i-fixed")
+
+
+class FakeSsmClient:
+    def __init__(self, region="ap-northeast-1"):
+        self.meta = SimpleNamespace(region_name=region)
+        self.calls = []
+        self.send_response = {"Command": {"CommandId": "command-1"}}
+        self.result_response = {
+            "CommandId": "command-1",
+            "InstanceId": "i-fixed",
+            "Status": "Success",
+            "ResponseCode": 0,
+            "StandardOutputContent": "ok",
+            "StandardErrorContent": "",
+        }
+
+    def send_command(self, **request):
+        self.calls.append(("send_command", request))
+        if isinstance(self.send_response, Exception):
+            raise self.send_response
+        return self.send_response
+
+    def get_command_invocation(self, **request):
+        self.calls.append(("get_command_invocation", request))
+        if isinstance(self.result_response, Exception):
+            raise self.result_response
+        return self.result_response
+
+
+class FakeSdkError(Exception):
+    def __init__(self, code):
+        super().__init__("sensitive SDK detail must never be displayed")
+        self.response = {"Error": {"Code": code}}
+
+
+class SsmRunCommandTransportTests(unittest.TestCase):
+    def transport(self, client):
+        return instance.SsmRunCommandTransport(
+            "ap-northeast-1",
+            "i-fixed",
+            {"inventory": ["uname -r", "python3 --version"]},
+            30,
+            client_factory=lambda region: client,
+        )
+
+    def test_send_command_uses_exact_fixed_request(self):
+        client = FakeSsmClient()
+        transport = self.transport(client)
+        self.assertEqual(transport.send_command("i-fixed", ["uname -r", "python3 --version"], 30), "command-1")
+        self.assertEqual(
+            client.calls,
+            [
+                (
+                    "send_command",
+                    {
+                        "InstanceIds": ["i-fixed"],
+                        "DocumentName": "AWS-RunShellScript",
+                        "Parameters": {"commands": ["uname -r", "python3 --version"]},
+                        "TimeoutSeconds": 30,
+                    },
+                )
+            ],
+        )
+
+    def test_result_preserves_validated_fields(self):
+        client = FakeSsmClient()
+        result = self.transport(client).command_result("i-fixed", "command-1")
+        self.assertEqual(
+            result,
+            {
+                "command_id": "command-1",
+                "status": "Success",
+                "response_code": 0,
+                "stdout": "ok",
+                "stderr": "",
+            },
+        )
+        self.assertEqual(
+            client.calls,
+            [("get_command_invocation", {"InstanceId": "i-fixed", "CommandId": "command-1"})],
+        )
+
+    def test_eventual_consistency_is_the_only_retryable_sdk_error(self):
+        for code, expected in (
+            ("InvocationDoesNotExist", instance.CommandInvocationNotReady),
+            ("AccessDeniedException", instance.InstanceError),
+            ("InvalidInstanceId", instance.InstanceError),
+            ("ThrottlingException", instance.InstanceError),
+        ):
+            with self.subTest(code=code):
+                client = FakeSsmClient()
+                client.result_response = FakeSdkError(code)
+                with self.assertRaises(expected) as raised:
+                    self.transport(client).command_result("i-fixed", "command-1")
+                if code != "InvocationDoesNotExist":
+                    self.assertNotIsInstance(raised.exception, instance.CommandInvocationNotReady)
+                    self.assertIn(code, str(raised.exception))
+                self.assertNotIn("sensitive SDK detail", str(raised.exception))
+
+    def test_non_service_sdk_failures_expose_only_exception_type(self):
+        client = FakeSsmClient()
+        client.send_response = TimeoutError("credential=https://private.invalid/token")
+        with self.assertRaisesRegex(instance.InstanceError, "TimeoutError") as raised:
+            self.transport(client).send_command(
+                "i-fixed", ["uname -r", "python3 --version"], 30
+            )
+        self.assertNotIn("private.invalid", str(raised.exception))
+        self.assertNotIn("credential", str(raised.exception))
+
+    def test_invalid_or_mismatched_responses_fail_closed(self):
+        cases = (
+            ({}, "mismatched target"),
+            ({
+                "CommandId": "command-1",
+                "InstanceId": "i-fixed",
+                "Status": "FutureStatus",
+                "ResponseCode": 0,
+                "StandardOutputContent": "",
+                "StandardErrorContent": "",
+            }, "unknown status"),
+            ({
+                "CommandId": "command-1",
+                "InstanceId": "i-fixed",
+                "Status": "Success",
+                "ResponseCode": "0",
+                "StandardOutputContent": "",
+                "StandardErrorContent": "",
+            }, "invalid response code"),
+        )
+        for payload, message in cases:
+            with self.subTest(message=message):
+                client = FakeSsmClient()
+                client.result_response = payload
+                with self.assertRaisesRegex(instance.InstanceError, message):
+                    self.transport(client).command_result("i-fixed", "command-1")
+
+    def test_precheck_builds_client_without_api_call_and_rejects_wrong_region(self):
+        client = FakeSsmClient()
+        result = self.transport(client).check(
+            "i-fixed", {"inventory": ["uname -r", "python3 --version"]}, 30
+        )
+        self.assertEqual(result["api_mutation"], False)
+        self.assertEqual(result["document_name"], "AWS-RunShellScript")
+        self.assertEqual(client.calls, [])
+
+        wrong_region = FakeSsmClient("us-east-1")
+        with self.assertRaisesRegex(instance.InstanceError, "region does not match"):
+            self.transport(wrong_region).check(
+                "i-fixed", {"inventory": ["uname -r", "python3 --version"]}, 30
+            )
+
+    def test_fixed_target_allowlist_and_timeout_boundaries_are_rejected(self):
+        transport = self.transport(FakeSsmClient())
+        with self.assertRaisesRegex(instance.InstanceError, "fixed target"):
+            transport.send_command("i-other", ["uname -r"], 30)
+        with self.assertRaisesRegex(instance.InstanceError, "allowlist"):
+            transport.check("i-fixed", {}, 30)
+        with self.assertRaisesRegex(instance.InstanceError, "allowlist"):
+            transport.send_command("i-fixed", ["uname -r"], 30)
+        with self.assertRaisesRegex(instance.InstanceError, "fixed timeout"):
+            transport.check(
+                "i-fixed", {"inventory": ["uname -r", "python3 --version"]}, True
+            )
+        with self.assertRaisesRegex(instance.InstanceError, "fixed timeout"):
+            transport.send_command("i-fixed", ["uname -r", "python3 --version"], 31)
 
 
 if __name__ == "__main__":
