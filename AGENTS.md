@@ -94,12 +94,6 @@ Work AgentとReview Agentは問題に遭遇したとき、`GOAL.md`への寄与�
 
 Review AgentはPR Reviewで問題がなければ、その場で`gh pr merge --merge --delete-branch`を実行する。GitHubがrequired Human review不足だけを理由に拒否した場合、`ai:pr-review`を外して`ai:human-review`を付ける。CODEOWNERSやbranch protectionを変更・迂回しない。
 
-### 実ホストへの反映
-
-定期実行のMain Agent、Work Agent、Review Agentは、systemd unitの配置、`daemon-reload`、unitのrestartなど、実ホストの設定変更を行わない。Repositoryへの変更と実ホストへの反映は別の操作として扱う。
-
-Humanが実ホストへの反映を明示的に指示した場合に限り、その指示を直接受けたroot agentが、指定された変更だけを同じsessionで実施する。関連変更が`origin/main`へmerge済みで、working treeがcleanかつlocal `main`が`origin/main`と一致していることを事前に確認する。原則として、merge後かつ次回の対象unit発火前、またはHumanが指定したmaintenance windowに実施する。
-
 systemd unitを反映する場合は、次の順序を守る。
 
 1. Repository内のunitを`systemd-analyze verify`で検証し、現在のinstalled unitとの差分と対象を確認する。
