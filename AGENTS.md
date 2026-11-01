@@ -78,7 +78,7 @@ CIがpendingのPRと、まだ承認されていない`ai:human-review`のPRは�
 
 Work AgentとReview Agentは問題に遭遇したとき、`GOAL.md`への寄与、現在のRepositoryとGitHubの状態、依存関係、利用できる権限・resource・代替手段、追加調査の価値を総合して次の行動を判断する。調査継続、Scope内の代替手段、方針修正、現在の対象の保留、別の実行可能な対象への移行を、固定的なblocker分類や一律の試行回数・時間制限で決めない。
 
-実行できない操作や未解決事項が残る場合は、必要に応じて観測事実、試行内容、判断理由、残る課題をIssueまたはPRに記録する。ただし、委任されたscope、権限、安全制約は超えず、IAM、本番・実ホストの操作を暗黙に実行しない。
+実行できない操作や未解決事項が残る場合は、必要に応じて観測事実、試行内容、判断理由、残る課題をIssueまたはPRに記録する。
 
 ### Workの成功・失敗
 
@@ -92,16 +92,16 @@ Work AgentとReview Agentは問題に遭遇したとき、`GOAL.md`への寄与�
 
 ### Merge
 
-Review AgentはPR Reviewで問題がなければ、その場で`gh pr merge --merge --delete-branch`を実行する。GitHubがrequired Human review不足だけを理由に拒否した場合、`ai:pr-review`を外して`ai:human-review`を付ける。CODEOWNERSやbranch protectionを変更・迂回しない。
+Review AgentはPR Reviewで問題がなければ、その場で`gh pr merge --merge --delete-branch`を実行する。GitHubがrequired Human review不足だけを理由に拒否した場合、`ai:pr-review`を外して`ai:human-review`を付ける。
 
 systemd unitを反映する場合は、次の順序を守る。
 
 1. Repository内のunitを`systemd-analyze verify`で検証し、現在のinstalled unitとの差分と対象を確認する。
 2. 対象unitだけを`/etc/systemd/system/`へ配置する。
 3. `systemctl daemon-reload`を実行する。
-4. 指示された対象unitだけをrestartまたはenableする。関連serviceを暗黙に手動起動しない。
+4. 対象unitをrestartまたはenableする。
 5. Repository版とinstalled版の一致、unitのactive状態、timerなら次回発火時刻を確認する。
-6. 実施者、実施時刻、実行した操作、検証結果をHumanへ報告する。
+6. 実施時刻、実行した操作、検証結果を最終出力に記載する。
 
 `scheduler/`配下または実ホスト反映を必要とする設定を変更するPRは、PR本文の「実ホスト反映」へ、反映要否、対象unit、merge後の操作、想定する再起動影響を記載する。mergeだけで反映済みとみなしてはならない。
 

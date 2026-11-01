@@ -24,7 +24,7 @@ Subagentのmodelとreasoning effortはMain Agentから継承する。同時に�
 - **merge commit後にremote branchを削除する:** 現在のRepository履歴に合わせてmerge commit方式を使い、merge済みbranchは残さない。
 - **UTCの固定時刻に1日2回起動する:** `OnCalendar`にtimezoneを含め、hostのlocal timezoneや前回の終了時刻に左右されず毎日00:00と12:00 UTCに起動する。`Persistent=false`によりhost停止中に逃した定刻分は起動時にcatch-upせず、次の定刻まで待つ。固定時刻以外の追加activationは設定しない。
 - **system serviceとして動かす:** user sessionやloginに依存させず、systemdのoneshot serviceを`User=ssm-user`で実行する。systemdと`flock`の両方で二重起動を防ぐ。
-- **Codexは`danger-full-access`で実行する:** Work Agentが`.git`を更新してcommit・pushする必要があるため、Codexのworkspace sandboxでは完結しない。一方、rootでは実行せず、systemdの`NoNewPrivileges=true`で権限昇格を禁止する。このEC2自体を検証環境として扱う判断である。
+- **Codexは`danger-full-access`で実行する:** Work Agentが`.git`を更新してcommit・pushする必要があるため、Codexのworkspace sandboxでは完結しない。このEC2自体を検証環境として扱う判断である。
 - **modelを固定しない:** WorkとReviewはMainのmodelとreasoning effortを継承する。実運用で品質・速度・費用の差が観測される前に役割別設定を増やさない。
 - **疑似E2Eを作らない:** このEC2とGitHub上で始まる実ループ自体を検証とする。構文、設定読込、既存テストだけを事前確認し、運用上の失敗はjournaldとGitHubから観測して改善する。
 
@@ -46,7 +46,7 @@ WorkとReviewは問題に遭遇したとき、調査継続、Scope内の代替�
 
 本体作業を開始する前の依存未完了、CI pending、一時的なGitHub障害は失敗とせず、Mainがskipするか最後の有効な状態で待つ。本体の実装・検証・研究的試行を開始した後、Scope内で完了条件を満たせないと判断した場合は、Workが原因と証拠を調査し、`Outcome: failed`、失敗段階、test・artifact・log、不合格check、cleanup・停止結果、未解決事項、再挑戦時の変更点をClose Commentへ記録してIssueをcloseする。初回実装の失敗ではPRを作らない。再挑戦は元Issueをreopenせず、新しいIssueを通常のIssue Reviewから開始する。
 
-credential、token、secret、不要なaccount ID・network詳細・機密出力はコメントやfixtureに保存しない。IAM変更、購入、本番変更はAgentが自動実行しない。
+credential、token、secretはコメントやfixtureに保存しない。
 
 `priority:urgent`は上表の状態とは独立した優先度labelである。Humanだけが新たなurgencyを指定できる。Mainはまず`priority:urgent`とAI状態labelの両方を持つ実行可能な対象へ通常の状態優先順位を適用し、該当がなければ通常queueを処理する。タイトルの`[Hot]`やauthor種別は優先度判定に使用しない。
 
@@ -60,9 +60,7 @@ Issue提案では、最も価値の高いGoal gapを選んだ後に成果形態�
 
 ## systemdへの配置
 
-Repositoryへの変更と実ホストへの反映は別の操作であり、mergeだけで反映済みとはみなさない。定期実行のMain Agent、Work Agent、Review Agentは実ホストを変更しない。
-
-実ホストへの反映は、Humanが明示的に指示した場合に、その指示を直接受けたroot agentが担当する。関連変更が`origin/main`へmerge済みで、working treeがcleanかつlocal `main`が`origin/main`と一致していることを確認し、原則として次回の対象unit発火前、またはHumanが指定したmaintenance windowに実施する。未mergeのworking treeを定期実行対象にはしない。
+Repositoryへの変更と実ホストへの反映は別の操作であり、mergeだけで反映済みとはみなさない。
 
 `scheduler/`配下または実ホスト反映を必要とする設定を変更するPRは、PR本文に反映要否、対象unit、merge後の操作、想定する再起動影響を記載する。
 
@@ -92,7 +90,7 @@ systemctl status ai-development.timer --no-pager
 systemctl list-timers ai-development.timer --all --no-pager
 ```
 
-反映後は、実施者、実施時刻、配置・reload・restartの対象、Repository版との一致、active状態、次回発火時刻をHumanへ報告する。
+反映後は、実施時刻、配置・reload・restartの対象、Repository版との一致、active状態、次回発火時刻を記録する。
 
 手動で1工程を実行する場合:
 

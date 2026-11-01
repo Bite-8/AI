@@ -11,7 +11,5 @@ WorkingDirectory=/home/ssm-user/project/AI
 Environment=HOME=/home/ssm-user
 Environment=PATH=/home/ssm-user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/home/ssm-user/project/AI/scripts/run-ai-development.sh
-NoNewPrivileges=true
-ProtectSystem=full
 UMask=0077
 TimeoutStartSec=infinity
