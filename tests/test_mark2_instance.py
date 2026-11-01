@@ -64,6 +64,36 @@ class FakeBackend:
         self.calls.append(("session", instance_id))
 
 
+class TransitionBackend(FakeBackend):
+    """Return one EC2/SSM observation per inspect call without real waiting."""
+
+    def __init__(self, observations):
+        super().__init__("stopped", ssm_present=False)
+        self.observations = list(observations)
+        self.current = None
+
+    def describe_ec2(self, instance_id):
+        self.calls.append(("describe_ec2", instance_id))
+        if not self.observations:
+            raise AssertionError("unexpected extra transition observation")
+        self.current = self.observations[0]
+        return {"instance_id": instance_id, "state": self.current[0]}
+
+    def describe_ssm(self, instance_id):
+        self.calls.append(("describe_ssm", instance_id))
+        _, ssm = self.observations.pop(0)
+        if isinstance(ssm, Exception):
+            raise ssm
+        if ssm is None:
+            raise instance.SsmTargetNotFound("no managed-instance record")
+        if isinstance(ssm, dict):
+            return ssm
+        return {"instance_id": instance_id, "ping_status": ssm}
+
+    def start(self, instance_id):
+        self.calls.append(("start", instance_id))
+
+
 class ConfigTests(unittest.TestCase):
     def test_fixed_target_and_commands_are_valid(self):
         value = config()
@@ -147,6 +177,84 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual([call[0] for call in backend.calls].count("start"), 1)
         self.assertEqual([call[0] for call in backend.calls].count("stop"), 1)
 
+    def test_start_waits_for_ssm_record_through_observed_startup_sequence(self):
+        target = config()["instance_id"]
+        backend = TransitionBackend(
+            [
+                ("stopped", None),
+                ("pending", None),
+                ("running", None),
+                ("running", "Online"),
+            ]
+        )
+        sleeps = []
+        result = instance.InstanceController(config(), backend, sleep=sleeps.append).start(target)
+        self.assertEqual(result["ec2"]["state"], "running")
+        self.assertEqual(result["ssm"]["ping_status"], "Online")
+        self.assertEqual(sleeps, [config()["timeouts"]["poll_seconds"]] * 2)
+        self.assertEqual([call[0] for call in backend.calls].count("start"), 1)
+
+    def test_start_waits_for_existing_offline_record_to_become_online(self):
+        target = config()["instance_id"]
+        backend = TransitionBackend(
+            [("stopped", None), ("running", "ConnectionLost"), ("running", "Online")]
+        )
+        result = instance.InstanceController(config(), backend, sleep=lambda unused: None).start(target)
+        self.assertEqual(result["ssm"]["ping_status"], "Online")
+
+    def test_start_absent_record_timeout_reports_last_incomplete_state(self):
+        value = deepcopy(config())
+        value["timeouts"].update(start_seconds=1, poll_seconds=1)
+        backend = TransitionBackend([("stopped", None), ("running", None)])
+        ticks = iter((0, 1))
+        controller = instance.InstanceController(
+            value, backend, monotonic=lambda: next(ticks), sleep=lambda unused: None
+        )
+        with self.assertRaisesRegex(
+            instance.InstanceError,
+            "last incomplete state: EC2 'running', SSM record absent",
+        ):
+            controller.start(value["instance_id"])
+
+    def test_start_wait_does_not_retry_ssm_api_or_validation_failures(self):
+        target = config()["instance_id"]
+        failures = (
+            instance.InstanceError("AccessDenied"),
+            instance.InstanceError("invalid managed-instance list"),
+            instance.InstanceError("expected exactly one managed instance"),
+        )
+        for failure in failures:
+            with self.subTest(failure=str(failure)):
+                backend = TransitionBackend([("stopped", None), ("running", failure)])
+                sleeps = []
+                with self.assertRaisesRegex(instance.InstanceError, str(failure)):
+                    instance.InstanceController(config(), backend, sleep=sleeps.append).start(target)
+                self.assertEqual(sleeps, [])
+
+    def test_start_wait_rejects_mismatched_ssm_target_without_retry(self):
+        target = config()["instance_id"]
+        backend = TransitionBackend(
+            [
+                ("stopped", None),
+                ("running", {"instance_id": "i-wrong", "ping_status": "Online"}),
+            ]
+        )
+        with self.assertRaisesRegex(instance.InstanceError, "SSM response instance ID does not match"):
+            instance.InstanceController(config(), backend, sleep=lambda unused: self.fail("must not retry")).start(
+                target
+            )
+
+    def test_start_wait_rejects_forbidden_ec2_state_before_ssm_lookup(self):
+        target = config()["instance_id"]
+        for state in ("shutting-down", "future-state"):
+            with self.subTest(state=state):
+                backend = TransitionBackend([("stopped", None), (state, None)])
+                with self.assertRaisesRegex(instance.InstanceError, "forbidden or unknown state"):
+                    instance.InstanceController(
+                        config(), backend, sleep=lambda unused: self.fail("must not retry")
+                    ).start(target)
+                self.assertEqual([call[0] for call in backend.calls].count("describe_ssm"), 1)
+
     def test_stop_is_idempotent_without_ssm_record(self):
         backend = FakeBackend("stopped", ssm_present=False)
         result = instance.InstanceController(config(), backend).stop()
@@ -160,7 +268,10 @@ class ControllerTests(unittest.TestCase):
         backend.start = lambda instance_id: backend.calls.append(("start", instance_id))
         ticks = iter((0, 0, 1))
         controller = instance.InstanceController(value, backend, monotonic=lambda: next(ticks), sleep=lambda unused: None)
-        with self.assertRaisesRegex(instance.InstanceError, "timed out"):
+        with self.assertRaisesRegex(
+            instance.InstanceError,
+            "last incomplete state: EC2 'stopped', SSM ping status 'ConnectionLost'",
+        ):
             controller.start(value["instance_id"])
 
     def test_run_command_uses_only_repository_allowlist(self):

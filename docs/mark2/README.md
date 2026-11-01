@@ -46,9 +46,11 @@ Mark2はHumanが用意した既存GPU EC2を再利用する。機械可読なsou
 
 未検証項目を推測で固定しない。次に固定targetを起動するpreliminary qualification sessionで、`run-command inventory`を実行する。その出力が[`qwen35_9b_l4_profile.json`](../../mark2/configs/qwen35_9b_l4_profile.json)と一致するか確認し、不一致ならmodel/datasetを取得せず停止する。AMI nameとvolume構成は必要なread-only権限が付与された後に再取得する。
 
-Repositoryが現在実装するAWS操作は、固定targetの`status`、通常の`start`/`stop`、allowlist済みSSM Run Command、SSM Session Managerである。terminate、reboot、強制stop、構成・権限変更、SSH fallbackは実装しない。各actionはEC2とSSMから返ったinstance IDを固定値と照合し、複数件、ID不一致、terminated、不明・遷移中state、SSM offline、権限エラー、timeoutでfail closedする。別instance、別region、別接続方式へfallbackしない。
+Repositoryが現在実装するAWS操作は、固定targetの`status`、通常の`start`/`stop`、allowlist済みSSM Run Command、SSM Session Managerである。terminate、reboot、強制stop、構成・権限変更、SSH fallbackは実装しない。各actionはEC2とSSMから返ったinstance IDを固定値と照合し、複数件、ID不一致、terminated、不明state、SSM offline、権限エラー、timeoutでfail closedする。別instance、別region、別接続方式へfallbackしない。start要求後の有限な収束待ちに限り、EC2 `pending`を未完了状態として扱う。
 
-固定targetのEC2応答が検証済みの`stopped`である場合に限り、SSM managed-instance一覧の0件は停止中にrecordが掲載されない状態として受理する。このとき`status`と`stop`のJSONは`ssm.record_present`を`false`として返し、SSMのID、ping状態、agent情報を捏造しない。SSM API失敗、不正応答、複数件、ID不一致、またはEC2が`stopped`以外での0件は引き続きnon-zeroとなる。recordが存在する場合は`ssm.record_present`が`true`となる。`start`の完了、`run-command`、`session`にはEC2 `running`と固定targetのSSM `Online`の両方が必要であり、この停止時例外は実行可能状態を保証しない。
+固定targetのEC2応答が検証済みの`stopped`である場合に限り、SSM managed-instance一覧の0件は停止中にrecordが掲載されない状態として一般操作で受理する。このとき`status`と`stop`のJSONは`ssm.record_present`を`false`として返し、SSMのID、ping状態、agent情報を捏造しない。追加の例外として、固定targetへのstart要求後の内部waitだけは、正常なSSM照会結果0件とEC2 `pending`または`running`の組合せを未完了snapshotとして既存の10分timeout内で再照会する。一般の`status`、start前検査、`run-command`、`session`、`stop`では、EC2が`stopped`以外のrecord不在は引き続きnon-zeroとなる。
+
+`start`が成功するのは、EC2 `running`かつ同じ固定targetのSSM recordが`Online`であると確認できた場合だけである。record不在または`Offline`等のままtimeoutした場合は最後の未完了状態を示してnon-zeroとなり、実行可能なsnapshotを捏造しない。SSM API・credential・network timeout、SSMの不正応答・複数件・ID不一致、EC2の禁止・不明stateはstart中もretry可能なrecord不在へ変換せず、即時にfail closedする。
 
 `start`は課金を開始する。固定instanceにはHumanがRepository外で管理する、起動から4時間後の強制停止機構がある。作業者はread-onlyで確認可能なら開始前にその有効性を確認し、確認手段がなければその事実をIssueへ記録して作業を続ける。この外部guardrailに依存してinstanceを放置せず、session終了時には通常の`stop`を実行し、続けて`status`で`stopped`を確認する責任を持つ。
 
@@ -149,7 +151,7 @@ python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 python3 -m mark2.instance status
 ```
 
-対象とpreliminary qualificationの目的を確認してから、次を実行する。confirmationは課金開始の誤操作を防ぐため固定instance IDと完全一致させる。`start`はEC2がrunningかつSSM Onlineになるまで最大10分だけ待つ。
+対象とpreliminary qualificationの目的を確認してから、次を実行する。confirmationは課金開始の誤操作を防ぐため固定instance IDと完全一致させる。`start`はEC2がrunningかつSSM Onlineになるまで最大10分だけ待つ。start要求直後にSSM recordがまだ掲載されていなくても、EC2が`pending`または`running`なら同じtimeout内でpollを継続するが、record不在を成功とは扱わない。
 
 ```bash
 python3 -m mark2.instance check-run-command

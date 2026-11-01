@@ -395,7 +395,7 @@ class InstanceController:
         self.sleep = sleep
         self.instance_id = config["instance_id"]
 
-    def inspect(self) -> dict[str, Any]:
+    def _inspect(self, *, allow_start_transition_absence: bool = False) -> dict[str, Any]:
         ec2 = self.backend.describe_ec2(self.instance_id)
         if ec2.get("instance_id") != self.instance_id:
             raise InstanceError("EC2 response instance ID does not match the fixed target")
@@ -405,7 +405,10 @@ class InstanceController:
         try:
             ssm = self.backend.describe_ssm(self.instance_id)
         except SsmTargetNotFound:
-            if state != "stopped":
+            absence_allowed = state == "stopped" or (
+                allow_start_transition_absence and state in {"pending", "running"}
+            )
+            if not absence_allowed:
                 raise InstanceError(
                     f"SSM target lookup returned no managed-instance record while EC2 state is {state!r}"
                 ) from None
@@ -415,6 +418,9 @@ class InstanceController:
             raise InstanceError("SSM response instance ID does not match the fixed target")
         ssm = {**ssm, "record_present": True}
         return {"region": self.config["region"], "ec2": ec2, "ssm": ssm}
+
+    def inspect(self) -> dict[str, Any]:
+        return self._inspect()
 
     @staticmethod
     def _require_online(snapshot: dict[str, Any]) -> None:
@@ -427,14 +433,23 @@ class InstanceController:
     def _wait(self, action: str, timeout: int) -> dict[str, Any]:
         deadline = self.monotonic() + timeout
         while True:
-            snapshot = self.inspect()
+            snapshot = self._inspect(allow_start_transition_absence=action == "start")
             state = snapshot["ec2"]["state"]
             if action == "start" and state == "running" and snapshot["ssm"].get("ping_status") == "Online":
                 return snapshot
             if action == "stop" and state == "stopped":
                 return snapshot
             if self.monotonic() >= deadline:
-                raise InstanceError(f"{action} timed out after {timeout} seconds for fixed target {self.instance_id}")
+                ssm = snapshot["ssm"]
+                ssm_state = (
+                    "record absent"
+                    if not ssm.get("record_present")
+                    else f"ping status {ssm.get('ping_status')!r}"
+                )
+                raise InstanceError(
+                    f"{action} timed out after {timeout} seconds for fixed target {self.instance_id}; "
+                    f"last incomplete state: EC2 {state!r}, SSM {ssm_state}"
+                )
             self.sleep(self.config["timeouts"]["poll_seconds"])
 
     def start(
