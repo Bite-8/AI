@@ -427,6 +427,26 @@ class InstanceController:
         if snapshot["ssm"].get("ping_status") != "Online":
             raise InstanceError("fixed target is not SSM Online")
 
+    @staticmethod
+    def _managed_instance_provenance(snapshot: dict[str, Any]) -> dict[str, Any]:
+        ssm = snapshot["ssm"]
+        agent_version = ssm.get("agent_version")
+        if (
+            ssm.get("record_present") is not True
+            or not isinstance(agent_version, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}", agent_version) is None
+        ):
+            raise InstanceError(
+                "fixed target SSM managed-instance record has an invalid agent version"
+            )
+        return {
+            "instance_id": ssm["instance_id"],
+            "agent_version": agent_version,
+            "platform_type": ssm.get("platform_type"),
+            "platform_name": ssm.get("platform_name"),
+            "platform_version": ssm.get("platform_version"),
+        }
+
     def status(self) -> dict[str, Any]:
         return self.inspect()
 
@@ -490,6 +510,7 @@ class InstanceController:
         commands = self.config["run_commands"].get(name)
         if commands is None:
             raise InstanceError(f"unknown repository command: {name}")
+        provenance = self._managed_instance_provenance(snapshot)
         timeout = self.config["timeouts"]["command_seconds"]
         command_id = self.backend.send_command(self.instance_id, list(commands), timeout)
         deadline = self.monotonic() + timeout
@@ -510,7 +531,10 @@ class InstanceController:
                         f"SSM Run Command {command_id} finished with status {status} "
                         f"and response code {result.get('response_code')!r}"
                     )
-                return result
+                return {
+                    "command_result": result,
+                    "managed_instance_provenance": provenance,
+                }
             if self.monotonic() >= deadline:
                 raise InstanceError(f"SSM Run Command {command_id} timed out after {timeout} seconds")
             self.sleep(self.config["timeouts"]["poll_seconds"])

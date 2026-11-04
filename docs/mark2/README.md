@@ -46,6 +46,8 @@ Mark2はHumanが用意した既存GPU EC2を再利用する。機械可読なsou
 
 未検証項目を推測で固定しない。次に固定targetを起動するpreliminary qualification sessionで、`run-command inventory`を実行する。その出力が[`qwen35_9b_l4_profile.json`](../../mark2/configs/qwen35_9b_l4_profile.json)と一致するか確認し、不一致ならmodel/datasetを取得せず停止する。AMI nameとvolume構成は必要なread-only権限が付与された後に再取得する。
 
+Issue #78の実機試行は、guestの`PATH`上で`amazon-ssm-agent`を解決できず失敗した結果のままであり、成功扱いに変更しない。inventoryのguest情報（OS、kernel、Python、GPU/CUDA）は固定allowlistのRun Commandで取得する一方、SSM Agent versionとplatform情報は同じ固定targetの`DescribeInstanceInformation` managed-instance metadataをsource of truthとする。`run-command`は送信直前にrecord、Online状態、非空で妥当なAgentVersionを検証し、成功JSONでは`command_result`と`managed_instance_provenance`を分けて記録する。Issue #78と同じ実機条件での再試行は本変更では実施せず、別Issueとして最新状態から判断する。
+
 Repositoryが現在実装するAWS操作は、固定targetの`status`、通常の`start`/`stop`、allowlist済みSSM Run Command、SSM Session Managerである。terminate、reboot、強制stop、構成・権限変更、SSH fallbackは実装しない。各actionはEC2とSSMから返ったinstance IDを固定値と照合し、複数件、ID不一致、terminated、不明state、SSM offline、権限エラー、timeoutでfail closedする。別instance、別region、別接続方式へfallbackしない。start要求後の有限な収束待ちに限り、EC2 `pending`を未完了状態として扱う。
 
 固定targetのEC2応答が検証済みの`stopped`である場合に限り、SSM managed-instance一覧の0件は停止中にrecordが掲載されない状態として一般操作で受理する。このとき`status`と`stop`のJSONは`ssm.record_present`を`false`として返し、SSMのID、ping状態、agent情報を捏造しない。追加の例外として、固定targetへのstart要求後の内部waitだけは、正常なSSM照会結果0件とEC2 `pending`または`running`の組合せを未完了snapshotとして既存の10分timeout内で再照会する。一般の`status`、start前検査、`run-command`、`session`、`stop`では、EC2が`stopped`以外のrecord不在は引き続きnon-zeroとなる。
@@ -161,7 +163,7 @@ python3 -m mark2.instance run-command inventory
 python3 -m mark2.instance session
 ```
 
-Run CommandはRepositoryに固定された`inventory`だけをBoto3/Botocore経由で受け付け、任意shell文字列をCLI引数から組み立てない。command ID、最終status、stdout、stderrを表示し、`InvocationDoesNotExist`だけをbounded pollingし、その他のAPI/credential/timeout/不正応答または全体の15分timeoutでnon-zeroになる。session開始失敗時もSSHへfallbackしない。Issue #30の実機baseline再試行はこのtransport修正には含まず、原因を反映した別Issueで行う。
+Run CommandはRepositoryに固定された`inventory`だけをBoto3/Botocore経由で受け付け、任意shell文字列をCLI引数から組み立てない。成功JSONの`command_result`にcommand ID、最終status、response code、stdout、stderrを、`managed_instance_provenance`に検証済み固定instance ID、SSM Agent version、platform type/name/versionを表示する。`InvocationDoesNotExist`だけをbounded pollingし、その他のAPI/credential/timeout/不正応答、AgentVersionの欠落・空文字・不正型、または全体の15分timeoutでnon-zeroになる。session開始失敗時もSSHへfallbackしない。Issue #30の実機baseline再試行はこのtransport修正には含まず、原因を反映した別Issueで行う。
 
 inventoryが承認済みprofileと一致した後、Python 3.10以上の隔離環境と `mark2/requirements.txt` の固定依存を使う。承認されたcommit SHAを記録し、modelまたはdatasetを取得する前にhost preflightを実行する。
 

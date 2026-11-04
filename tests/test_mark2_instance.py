@@ -14,10 +14,17 @@ def config():
 
 
 class FakeBackend:
-    def __init__(self, ec2_state="running", ping_status="Online", ssm_present=True):
+    def __init__(
+        self,
+        ec2_state="running",
+        ping_status="Online",
+        ssm_present=True,
+        agent_version="3.3.1957.0",
+    ):
         self.ec2_state = ec2_state
         self.ping_status = ping_status
         self.ssm_present = ssm_present
+        self.agent_version = agent_version
         self.calls = []
         self.command_status = "Success"
 
@@ -29,7 +36,14 @@ class FakeBackend:
         self.calls.append(("describe_ssm", instance_id))
         if not self.ssm_present:
             raise instance.SsmTargetNotFound("no managed-instance record")
-        return {"instance_id": instance_id, "ping_status": self.ping_status}
+        return {
+            "instance_id": instance_id,
+            "ping_status": self.ping_status,
+            "agent_version": self.agent_version,
+            "platform_type": "Linux",
+            "platform_name": "Ubuntu",
+            "platform_version": "22.04",
+        }
 
     def start(self, instance_id):
         self.calls.append(("start", instance_id))
@@ -100,6 +114,17 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(value["region"], "ap-northeast-1")
         self.assertEqual(value["instance_id"], "i-0fb8c2572680019af")
         self.assertEqual(set(value["run_commands"]), {"inventory"})
+        self.assertNotIn("amazon-ssm-agent -version", value["run_commands"]["inventory"])
+        self.assertEqual(
+            value["run_commands"]["inventory"],
+            [
+                "cat /etc/os-release",
+                "uname -r",
+                "python3 --version",
+                "nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader",
+                "nvidia-smi",
+            ],
+        )
 
     def test_target_override_is_rejected(self):
         for field, replacement, message in (
@@ -278,11 +303,50 @@ class ControllerTests(unittest.TestCase):
         backend = FakeBackend()
         controller = instance.InstanceController(config(), backend)
         result = controller.run_command("inventory")
-        self.assertEqual(result["status"], "Success")
+        self.assertEqual(result["command_result"]["status"], "Success")
+        self.assertEqual(
+            result["managed_instance_provenance"],
+            {
+                "instance_id": config()["instance_id"],
+                "agent_version": "3.3.1957.0",
+                "platform_type": "Linux",
+                "platform_name": "Ubuntu",
+                "platform_version": "22.04",
+            },
+        )
         call = next(call for call in backend.calls if call[0] == "send_command")
         self.assertEqual(call[2], config()["run_commands"]["inventory"])
         with self.assertRaisesRegex(instance.InstanceError, "unknown repository command"):
             controller.run_command("echo-secret")
+
+    def test_run_command_rejects_invalid_agent_version_before_send(self):
+        missing_backend = FakeBackend()
+        missing_backend.describe_ssm = lambda instance_id: {
+            "instance_id": instance_id,
+            "ping_status": "Online",
+            "platform_type": "Linux",
+            "platform_name": "Ubuntu",
+            "platform_version": "22.04",
+        }
+        with self.assertRaisesRegex(instance.InstanceError, "invalid agent version"):
+            instance.InstanceController(config(), missing_backend).run_command("inventory")
+        self.assertNotIn("send_command", [call[0] for call in missing_backend.calls])
+
+        for agent_version in (None, "", "   ", [], 123, "3.3.1957.0 invalid"):
+            with self.subTest(agent_version=agent_version):
+                backend = FakeBackend(agent_version=agent_version)
+                with self.assertRaisesRegex(instance.InstanceError, "invalid agent version"):
+                    instance.InstanceController(config(), backend).run_command("inventory")
+                self.assertNotIn("send_command", [call[0] for call in backend.calls])
+
+    def test_run_command_requires_running_online_snapshot_before_send(self):
+        for backend, message in (
+            (FakeBackend(ec2_state="stopped", ssm_present=False), "requires the fixed target to be running"),
+            (FakeBackend(ping_status="ConnectionLost"), "not SSM Online"),
+        ):
+            with self.subTest(message=message), self.assertRaisesRegex(instance.InstanceError, message):
+                instance.InstanceController(config(), backend).run_command("inventory")
+            self.assertNotIn("send_command", [call[0] for call in backend.calls])
 
     def test_run_command_failure_is_reported(self):
         backend = FakeBackend()
@@ -305,7 +369,7 @@ class ControllerTests(unittest.TestCase):
         backend.command_result = command_result
         sleeps = []
         result = instance.InstanceController(config(), backend, sleep=sleeps.append).run_command("inventory")
-        self.assertEqual(result["status"], "Success")
+        self.assertEqual(result["command_result"]["status"], "Success")
         self.assertEqual(attempts, 2)
         self.assertEqual(sleeps, [config()["timeouts"]["poll_seconds"]])
 
