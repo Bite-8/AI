@@ -6,6 +6,7 @@ import argparse
 import importlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -18,6 +19,12 @@ DEFAULT_CONFIG = PACKAGE_DIR / "configs" / "gpu_instance.json"
 EC2_STATES = {"pending", "running", "shutting-down", "terminated", "stopping", "stopped"}
 TERMINAL_COMMAND_STATES = {"Success", "Cancelled", "TimedOut", "Failed", "Cancelling"}
 COMMAND_STATES = TERMINAL_COMMAND_STATES | {"Pending", "InProgress", "Delayed"}
+SESSION_MANAGER_PLUGIN_MINIMUM_VERSION = (1, 2, 764, 0)
+SESSION_MANAGER_PLUGIN_MINIMUM_VERSION_TEXT = "1.2.764.0"
+SESSION_MANAGER_PLUGIN_SUCCESS_MESSAGE = (
+    "The Session Manager plugin was installed successfully. Use the AWS CLI to start a session."
+)
+SESSION_MANAGER_PLUGIN_TIMEOUT_SECONDS = 5
 
 
 class InstanceError(RuntimeError):
@@ -30,6 +37,75 @@ class CommandInvocationNotReady(InstanceError):
 
 class SsmTargetNotFound(InstanceError):
     """A valid SSM lookup returned no managed-instance record for the fixed target."""
+
+
+class SessionManagerClientCheck:
+    """Validate the local Session Manager plugin without contacting AWS."""
+
+    def __init__(
+        self,
+        finder: Callable[[str], str | None] = shutil.which,
+        runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        timeout: int = SESSION_MANAGER_PLUGIN_TIMEOUT_SECONDS,
+    ) -> None:
+        self.finder = finder
+        self.runner = runner
+        self.timeout = timeout
+
+    def _run(
+        self,
+        executable: str,
+        arguments: list[str],
+        operation: str,
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            result = self.runner(
+                [executable, *arguments],
+                text=True,
+                capture_output=True,
+                timeout=self.timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise InstanceError(
+                f"Session Manager plugin {operation} failed: {type(exc).__name__}"
+            ) from exc
+        if result.returncode != 0:
+            raise InstanceError(f"Session Manager plugin {operation} exited non-zero")
+        return result
+
+    def check(self) -> dict[str, Any]:
+        found = self.finder("session-manager-plugin")
+        if not found:
+            raise InstanceError("Session Manager plugin was not found on PATH")
+        executable = str(Path(found).resolve())
+
+        version_result = self._run(executable, ["--version"], "version check")
+        version_text = version_result.stdout.strip()
+        if version_result.stderr.strip() or re.fullmatch(r"[0-9]+(?:\.[0-9]+){3}", version_text) is None:
+            raise InstanceError("Session Manager plugin returned an invalid version")
+        version = tuple(int(component) for component in version_text.split("."))
+        if version < SESSION_MANAGER_PLUGIN_MINIMUM_VERSION:
+            raise InstanceError(
+                "Session Manager plugin version is below the required minimum "
+                f"{SESSION_MANAGER_PLUGIN_MINIMUM_VERSION_TEXT}"
+            )
+
+        standalone_result = self._run(executable, [], "standalone check")
+        if (
+            standalone_result.stdout.strip() != SESSION_MANAGER_PLUGIN_SUCCESS_MESSAGE
+            or standalone_result.stderr.strip()
+        ):
+            raise InstanceError(
+                "Session Manager plugin standalone verification did not return the expected message"
+            )
+        return {
+            "api_mutation": False,
+            "executable": executable,
+            "minimum_version": SESSION_MANAGER_PLUGIN_MINIMUM_VERSION_TEXT,
+            "standalone_verification": "passed",
+            "version": version_text,
+        }
 
 
 def _exact_keys(value: Any, expected: set[str], label: str) -> dict[str, Any]:
@@ -246,6 +322,7 @@ class AwsCliBackend:
         run_commands: dict[str, list[str]] | None = None,
         command_timeout: int = 0,
         run_command_transport: SsmRunCommandTransport | None = None,
+        session_client_check: SessionManagerClientCheck | None = None,
     ) -> None:
         self.region = region
         self.instance_id = instance_id
@@ -256,6 +333,7 @@ class AwsCliBackend:
             run_commands or {},
             command_timeout,
         )
+        self.session_client_check = session_client_check or SessionManagerClientCheck()
 
     def _target(self, instance_id: str) -> None:
         if instance_id != self.instance_id:
@@ -376,6 +454,9 @@ class AwsCliBackend:
     ) -> dict[str, Any]:
         return self.run_command_transport.check(instance_id, commands, timeout)
 
+    def check_session_client(self) -> dict[str, Any]:
+        return self.session_client_check.check()
+
     def session(self, instance_id: str) -> None:
         self._target(instance_id)
         self._run(["ssm", "start-session", "--target", instance_id], interactive=True)
@@ -479,6 +560,7 @@ class InstanceController:
     ) -> dict[str, Any]:
         if confirmation != self.instance_id:
             raise InstanceError(f"start requires --confirm-start {self.instance_id}")
+        self.check_session_client()
         snapshot = self.inspect()
         if before_start is not None:
             before_start(snapshot)
@@ -546,7 +628,11 @@ class InstanceController:
             self.config["timeouts"]["command_seconds"],
         )
 
+    def check_session_client(self) -> dict[str, Any]:
+        return self.backend.check_session_client()
+
     def session(self) -> None:
+        self.check_session_client()
         snapshot = self.inspect()
         if snapshot["ec2"]["state"] != "running":
             raise InstanceError("session requires the fixed target to be running")
@@ -566,6 +652,10 @@ def build_parser(config: dict[str, Any]) -> argparse.ArgumentParser:
     actions.add_parser(
         "check-run-command",
         help="validate the fixed SDK Run Command transport without an AWS API mutation",
+    )
+    actions.add_parser(
+        "check-session-client",
+        help="validate the local Session Manager plugin without an AWS API request",
     )
     actions.add_parser("session", help="open an SSM Session Manager session (no SSH fallback)")
     return parser
@@ -602,6 +692,8 @@ def main() -> int:
             result = controller.run_command(args.name)
         elif args.action == "check-run-command":
             result = controller.check_run_command()
+        elif args.action == "check-session-client":
+            result = controller.check_session_client()
         else:
             controller.session()
             result = {"region": config["region"], "instance_id": config["instance_id"], "session": "ended"}

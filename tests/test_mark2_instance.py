@@ -74,6 +74,16 @@ class FakeBackend:
         self.calls.append(("check_run_command", instance_id, commands, timeout))
         return {"transport": "fake", "api_mutation": False}
 
+    def check_session_client(self):
+        self.calls.append(("check_session_client",))
+        return {
+            "api_mutation": False,
+            "executable": "/usr/local/bin/session-manager-plugin",
+            "minimum_version": "1.2.764.0",
+            "standalone_verification": "passed",
+            "version": "1.2.764.0",
+        }
+
     def session(self, instance_id):
         self.calls.append(("session", instance_id))
 
@@ -188,6 +198,15 @@ class ControllerTests(unittest.TestCase):
             instance.InstanceController(config(), backend).start(None)
         self.assertEqual(backend.calls, [])
 
+    def test_start_client_failure_precedes_aws_inspection(self):
+        backend = FakeBackend("stopped", ssm_present=False)
+        backend.check_session_client = lambda: (_ for _ in ()).throw(
+            instance.InstanceError("local client unavailable")
+        )
+        with self.assertRaisesRegex(instance.InstanceError, "local client unavailable"):
+            instance.InstanceController(config(), backend).start(config()["instance_id"])
+        self.assertEqual(backend.calls, [])
+
     def test_start_and_stop_normal_paths(self):
         backend = FakeBackend("stopped", ssm_present=False)
         controller = instance.InstanceController(config(), backend, sleep=lambda unused: None)
@@ -201,6 +220,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(stopped["ssm"], {"record_present": False})
         self.assertEqual([call[0] for call in backend.calls].count("start"), 1)
         self.assertEqual([call[0] for call in backend.calls].count("stop"), 1)
+        self.assertEqual(backend.calls[0], ("check_session_client",))
 
     def test_start_waits_for_ssm_record_through_observed_startup_sequence(self):
         target = config()["instance_id"]
@@ -412,13 +432,147 @@ class ControllerTests(unittest.TestCase):
             ],
         )
 
+    def test_check_session_client_does_not_inspect_or_mutate_the_target(self):
+        backend = FakeBackend()
+        result = instance.InstanceController(config(), backend).check_session_client()
+        self.assertEqual(result["api_mutation"], False)
+        self.assertEqual(backend.calls, [("check_session_client",)])
+
+    def test_non_session_actions_do_not_require_session_client(self):
+        for action in ("status", "stop", "run_command", "check_run_command"):
+            with self.subTest(action=action):
+                backend = FakeBackend()
+                backend.check_session_client = lambda: self.fail("must not check plugin")
+                controller = instance.InstanceController(config(), backend)
+                if action == "run_command":
+                    controller.run_command("inventory")
+                else:
+                    getattr(controller, action)()
+
     def test_session_requires_running_online_target(self):
         backend = FakeBackend()
         instance.InstanceController(config(), backend).session()
         self.assertIn(("session", config()["instance_id"]), backend.calls)
+        self.assertEqual(backend.calls[0], ("check_session_client",))
         offline = FakeBackend("running", "ConnectionLost")
         with self.assertRaisesRegex(instance.InstanceError, "not SSM Online"):
             instance.InstanceController(config(), offline).session()
+
+    def test_session_client_failure_precedes_aws_inspection_and_session(self):
+        backend = FakeBackend()
+        backend.check_session_client = lambda: (_ for _ in ()).throw(
+            instance.InstanceError("local client unavailable")
+        )
+        with self.assertRaisesRegex(instance.InstanceError, "local client unavailable"):
+            instance.InstanceController(config(), backend).session()
+        self.assertEqual(backend.calls, [])
+
+
+class SessionManagerClientCheckTests(unittest.TestCase):
+    @staticmethod
+    def result(args, returncode=0, stdout="", stderr=""):
+        return subprocess.CompletedProcess(args, returncode, stdout, stderr)
+
+    def test_success_uses_bounded_shell_free_checks_and_returns_evidence(self):
+        calls = []
+
+        def runner(args, **kwargs):
+            calls.append((args, kwargs))
+            if args[-1:] == ["--version"]:
+                return self.result(args, stdout="1.2.764.0\n")
+            return self.result(args, stdout=instance.SESSION_MANAGER_PLUGIN_SUCCESS_MESSAGE + "\n")
+
+        check = instance.SessionManagerClientCheck(
+            finder=lambda name: "/opt/session-manager-plugin",
+            runner=runner,
+        )
+        result = check.check()
+        self.assertEqual(
+            result,
+            {
+                "api_mutation": False,
+                "executable": "/opt/session-manager-plugin",
+                "minimum_version": "1.2.764.0",
+                "standalone_verification": "passed",
+                "version": "1.2.764.0",
+            },
+        )
+        self.assertEqual(
+            [call[0] for call in calls],
+            [
+                ["/opt/session-manager-plugin", "--version"],
+                ["/opt/session-manager-plugin"],
+            ],
+        )
+        for _, kwargs in calls:
+            self.assertEqual(kwargs["timeout"], instance.SESSION_MANAGER_PLUGIN_TIMEOUT_SECONDS)
+            self.assertIs(kwargs["capture_output"], True)
+            self.assertNotIn("shell", kwargs)
+
+    def test_missing_plugin_fails_without_starting_a_process(self):
+        check = instance.SessionManagerClientCheck(
+            finder=lambda name: None,
+            runner=lambda *args, **kwargs: self.fail("runner must not be called"),
+        )
+        with self.assertRaisesRegex(instance.InstanceError, "not found on PATH"):
+            check.check()
+
+    def test_timeout_and_launch_failure_expose_only_exception_type(self):
+        failures = (
+            subprocess.TimeoutExpired(["secret-command"], 5, output="credential=secret"),
+            OSError("credential=secret"),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                check = instance.SessionManagerClientCheck(
+                    finder=lambda name: "/opt/session-manager-plugin",
+                    runner=lambda *args, **kwargs: (_ for _ in ()).throw(failure),
+                )
+                with self.assertRaisesRegex(instance.InstanceError, type(failure).__name__) as raised:
+                    check.check()
+                self.assertNotIn("secret", str(raised.exception))
+                self.assertNotIn("credential", str(raised.exception))
+
+    def test_nonzero_output_is_not_exposed(self):
+        check = instance.SessionManagerClientCheck(
+            finder=lambda name: "/opt/session-manager-plugin",
+            runner=lambda args, **kwargs: self.result(
+                args, returncode=1, stderr="credential=https://private.invalid/token"
+            ),
+        )
+        with self.assertRaisesRegex(instance.InstanceError, "exited non-zero") as raised:
+            check.check()
+        self.assertNotIn("private.invalid", str(raised.exception))
+        self.assertNotIn("credential", str(raised.exception))
+
+    def test_invalid_and_old_versions_fail_closed(self):
+        for version, message in (
+            ("1.2.764", "invalid version"),
+            ("version 1.2.764.0", "invalid version"),
+            ("1.2.763.0", "below the required minimum"),
+        ):
+            with self.subTest(version=version):
+                check = instance.SessionManagerClientCheck(
+                    finder=lambda name: "/opt/session-manager-plugin",
+                    runner=lambda args, **kwargs: self.result(args, stdout=version),
+                )
+                with self.assertRaisesRegex(instance.InstanceError, message):
+                    check.check()
+
+    def test_standalone_message_mismatch_fails_without_exposing_output(self):
+        def runner(args, **kwargs):
+            if args[-1:] == ["--version"]:
+                return self.result(args, stdout="1.2.764.0")
+            return self.result(args, stdout="credential=https://private.invalid/token")
+
+        check = instance.SessionManagerClientCheck(
+            finder=lambda name: "/opt/session-manager-plugin",
+            runner=runner,
+        )
+        with self.assertRaisesRegex(instance.InstanceError, "expected message") as raised:
+            check.check()
+        self.assertNotIn("private.invalid", str(raised.exception))
+        self.assertNotIn("credential", str(raised.exception))
 
 
 class AwsCliBackendTests(unittest.TestCase):
