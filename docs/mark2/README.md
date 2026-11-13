@@ -138,6 +138,7 @@ Repositoryと固定target configの無料の事前検査:
 python3 -m mark2.run check-config
 python3 -m mark2.run check-experiment-contract
 python3 -m mark2.instance --help
+python3 -m mark2.instance check-session-client
 python3 -m mark2.instance check-run-command
 python3 -m unittest discover -s tests -v
 python3 -m mark2.run run --backend mock --run-id mock-1
@@ -149,6 +150,8 @@ python3 -m mark2.run compare artifacts/mark2/mock-1 artifacts/mark2/mock-2
 
 `check-run-command`はBoto3/Botocoreのimport、SSM client構築、固定region・target、Repository allowlist、timeoutを検査する。`SendCommand`、`GetCommandInvocation`を含むAWS APIは呼ばず、instanceを起動する前に実行する。SDK依存やclient構築に問題があればnon-zeroで停止する。この検査はRun Command transportだけを対象とし、AWS CLIを使い続けるEC2状態操作、SSM Online照会、Session Managerを置き換えない。
 
+`check-session-client`はPATH上の`session-manager-plugin`をshellを介さず解決し、5秒のbounded timeoutで`--version`とAWS公式の引数なし単体検証を実行する。version `1.2.764.0`以上かつ公式成功messageと完全一致する場合だけ、version、minimum version、解決済み実行file、単体検証結果、`api_mutation: false`をJSONで返す。AWS APIやsessionは開始しない。plugin不在、旧version、timeout、不正出力ではprocess出力を表示せずnon-zeroで停止する。hostへの公式packageの署名検証・system installはIssue #82の責任であり、このRepository checkはpackageやPATHを変更しない。
+
 ```bash
 python3 -m mark2.instance status
 ```
@@ -156,12 +159,15 @@ python3 -m mark2.instance status
 対象とpreliminary qualificationの目的を確認してから、次を実行する。confirmationは課金開始の誤操作を防ぐため固定instance IDと完全一致させる。`start`はEC2がrunningかつSSM Onlineになるまで最大10分だけ待つ。start要求直後にSSM recordがまだ掲載されていなくても、EC2が`pending`または`running`なら同じtimeout内でpollを継続するが、record不在を成功とは扱わない。
 
 ```bash
+python3 -m mark2.instance check-session-client
 python3 -m mark2.instance check-run-command
 python3 -m mark2.instance start \
   --confirm-start i-0fb8c2572680019af
 python3 -m mark2.instance run-command inventory
 python3 -m mark2.instance session
 ```
+
+`start`はconfirmationが固定instance IDと一致した後、EC2/SSMの参照や課金開始APIより先に同じSession Manager client checkを必須化する。`session`もtarget参照やsession開始より先に同じcheckを行う。`status`、`stop`、`run-command`、`check-run-command`はpluginに依存せず、特に通常stopによるcleanupを妨げない。
 
 Run CommandはRepositoryに固定された`inventory`だけをBoto3/Botocore経由で受け付け、任意shell文字列をCLI引数から組み立てない。成功JSONの`command_result`にcommand ID、最終status、response code、stdout、stderrを、`managed_instance_provenance`に検証済み固定instance ID、SSM Agent version、platform type/name/versionを表示する。`InvocationDoesNotExist`だけをbounded pollingし、その他のAPI/credential/timeout/不正応答、AgentVersionの欠落・空文字・不正型、または全体の15分timeoutでnon-zeroになる。session開始失敗時もSSHへfallbackしない。Issue #30の実機baseline再試行はこのtransport修正には含まず、原因を反映した別Issueで行う。
 
