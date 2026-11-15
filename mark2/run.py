@@ -26,7 +26,14 @@ from .config import (
     validate_experiment_contract,
     validate_run_id,
 )
-from .environment import SystemProbe, collect, command, evaluate_preflight, read_profile
+from .environment import (
+    SystemProbe,
+    collect,
+    command,
+    evaluate_preflight,
+    git_worktree_evidence,
+    read_profile,
+)
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -236,6 +243,7 @@ def make_prediction(row: dict[str, Any], output_text: str, elapsed: float) -> di
 
 def _snapshot_sources(profile_path: Path = DEFAULT_PROFILE) -> tuple[Path, ...]:
     return (
+        PACKAGE_DIR / "__init__.py",
         PACKAGE_DIR / "config.py",
         PACKAGE_DIR / "environment.py",
         PACKAGE_DIR / "run.py",
@@ -321,9 +329,7 @@ def execute_run(
         "contract_sha256": sha256_json(config),
         "contract": config,
         "git_commit": _command_evidence(["git", "-C", str(REPOSITORY_ROOT), "rev-parse", "HEAD"]),
-        "git_status": _command_evidence(
-            ["git", "-C", str(REPOSITORY_ROOT), "status", "--porcelain", "--untracked-files=no"]
-        ),
+        "git_status": git_worktree_evidence(REPOSITORY_ROOT),
         "environment": collect(run_dir),
         "source_sha256": _snapshot(run_dir, profile_path),
         "result_classification": "unverified" if backend.name == "transformers" else "mock-only",
@@ -1003,7 +1009,14 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         actual = [item.get(field) if item else None for item in manifests]
         _qualification_check(checks, f"pair.same_{field}", "identical", actual, actual[0] is not None and actual[0] == actual[1], f"both runs must use the same {field}")
     statuses = [item.get("git_status") if item else None for item in manifests]
-    _qualification_check(checks, "pair.clean_tracked_tree", ["", ""], statuses, statuses == ["", ""], "both runs must record a clean tracked worktree")
+    _qualification_check(
+        checks,
+        "pair.clean_worktree",
+        ["", ""],
+        statuses,
+        statuses == ["", ""],
+        "both runs must record no tracked, staged, or non-ignored untracked changes",
+    )
 
     fixed_host = []
     for preflight in preflights:
@@ -1290,6 +1303,7 @@ def qualify_experiment_artifacts(
         {
             "run_id": manifest.get("run_id"),
             "git_commit": manifest.get("git_commit"),
+            "git_status": manifest.get("git_status"),
             "source_sha256": manifest.get("source_sha256"),
         }
         if isinstance(manifest, dict)
@@ -1297,7 +1311,16 @@ def qualify_experiment_artifacts(
         for manifest in manifests
     ]
     commits = [item["git_commit"] if item is not None else None for item in source_evidence]
+    worktrees = [item["git_status"] if item is not None else None for item in source_evidence]
     sources = [item["source_sha256"] if item is not None else None for item in source_evidence]
+    _qualification_check(
+        checks,
+        "experiment.clean_worktrees",
+        ["", "", "", ""],
+        worktrees,
+        worktrees == ["", "", "", ""],
+        "all four runs must record no tracked, staged, or non-ignored untracked changes",
+    )
     _qualification_check(
         checks,
         "experiment.same_git_commit",
