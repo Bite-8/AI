@@ -36,6 +36,19 @@ def command(args: list[str], timeout: int = 10) -> dict[str, Any]:
     return {"status": "ok", "output": result.stdout.strip()}
 
 
+def git_worktree_evidence(repository_root: Path) -> Any:
+    """Return every non-ignored Git worktree change, preserving failures."""
+    result = command(
+        ["git", "-C", str(repository_root), "status", "--porcelain", "--untracked-files=all"]
+    )
+    output = result.get("output")
+    if result.get("status") == "ok" and isinstance(output, str):
+        return output
+    if result.get("status") == "ok":
+        return {"status": "error", "reason": "git status returned non-text output"}
+    return result
+
+
 def _memory_bytes() -> int | None:
     try:
         for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
@@ -82,9 +95,7 @@ class SystemProbe:
 
     def snapshot(self) -> dict[str, Any]:
         commit = command(["git", "-C", str(self.repository_root), "rev-parse", "HEAD"])
-        status = command(
-            ["git", "-C", str(self.repository_root), "status", "--porcelain", "--untracked-files=no"]
-        )
+        worktree = git_worktree_evidence(self.repository_root)
         disk = shutil.disk_usage(self.filesystem_path)
         accelerator: dict[str, Any]
         try:
@@ -114,7 +125,7 @@ class SystemProbe:
             }
         return {
             "git_commit": commit.get("output") if commit.get("status") == "ok" else commit,
-            "git_tracked_status": status.get("output") if status.get("status") == "ok" else status,
+            "git_worktree_status": worktree,
             "python_version": list(sys.version_info[:3]),
             "packages": _packages(),
             "disk_free_bytes": disk.free,
@@ -150,8 +161,16 @@ def evaluate_preflight(profile: dict[str, Any], expected_commit: str, probe: Sys
 
     commit = actual["git_commit"]
     checks.append(_check("git_commit", expected_commit, commit, commit == expected_commit, "checkout must match approved commit"))
-    status = actual["git_tracked_status"]
-    checks.append(_check("git_tracked_files_clean", "", status, status == "", "tracked files must have no uncommitted changes"))
+    status = actual["git_worktree_status"]
+    checks.append(
+        _check(
+            "git_worktree_clean",
+            "",
+            status,
+            status == "",
+            "worktree must have no tracked, staged, or non-ignored untracked changes",
+        )
+    )
 
     minimum_python = tuple(profile["python_minimum"])
     python_version = tuple(actual["python_version"])

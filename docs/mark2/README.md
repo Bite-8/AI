@@ -70,7 +70,7 @@ Repositoryが現在実装するAWS操作は、固定targetの`status`、通常�
 - Metric: 最初の独立したA〜Dを採用するexact-match accuracy。parse不能は不正解
 - 再現条件: 独立2 runでcontract、question hashと予測列が同一、accuracy差0.0
 
-各runはcommit、作業ツリー、環境、依存、GPU、source hash、時間、peak memory、予測、metric、成否をrun ID別artifactへ保存する。mock結果は`mock-only`、未実行の実機結果は`unverified`として区別する。
+各runはcommit、作業ツリー、環境、依存、GPU、source hash、時間、peak memory、予測、metric、成否をrun ID別artifactへ保存する。作業ツリーはtracked・staged変更だけでなく、Gitがignoreしていないuntracked fileとdirectoryも含めて空でなければならない。artifact、virtual environment、log、bytecode等の生成物境界はRepositoryの`.gitignore`に従う。source snapshotにはrunnerが直接実行・importする`mark2/__init__.py`、`config.py`、`environment.py`、`run.py`、requirements、execution profileを保存する。mock結果は`mock-only`、未実行の実機結果は`unverified`として区別する。
 
 ## Controlled experiment contract
 
@@ -116,7 +116,7 @@ python3 -m mark2.run evaluate-experiment \
   --output artifacts/mark2/experiment-evaluation.json
 ```
 
-位置引数はbaseline 2 run、variant 2 runの順である。`qualify-experiment`は各artifactに既存のrepository-measured検査を適用し、schema v2 contractの本体・canonical SHA-256・保存copy、全directory/run IDの一意性、4 runすべてのcommit/source同一性、固定環境、variantの事前登録済み予測再現条件、評価contract・sample順・target・prompt/model/runtime条件を検査する。
+位置引数はbaseline 2 run、variant 2 runの順である。`qualify-experiment`は各artifactに既存のrepository-measured検査を適用し、schema v2 contractの本体・canonical SHA-256・保存copy、全directory/run IDの一意性、4 runすべてのclean worktree evidenceとcommit/source同一性、固定環境、variantの事前登録済み予測再現条件、評価contract・sample順・target・prompt/model/runtime条件を検査する。
 
 resource gateは保存済みartifactだけを使う。生成時間は各runの全predictionにある`generation_seconds`の合計で、baseline 2 runの算術平均をreferenceとし、variant run 1と2をそれぞれ倍率上限と比較する。memoryはrun 1同士・run 2同士でGPU indexを対応させ、`gpu_peak_allocated_bytes`のvariant-minus-baselineが全indexで上限以下かを検査する。GPU配列長の不一致、baseline referenceが0秒、欠落・不正・非有限な実測値はfail closedとなる。上限ちょうどは合格する。
 
@@ -199,7 +199,7 @@ python3 -m mark2.run qualify \
   --output artifacts/mark2/baseline-qualification.json
 ```
 
-`compare`はmockを含むoffline bookkeeping向けの再現性比較であり、実機baselineの採用判定ではない。実機2 run後は必ず`qualify`を実行する。`qualify`は各runの分類・preflight・contract・source・dataset selection・prediction・metric・model artifactの内部整合性と、2 run間のrun ID、commit、clean tree、固定依存・GPU条件、各hash、予測、accuracy差を検査する。全checkの名前、期待値、実測値、理由、合否と総合`eligible`判定をJSONへ保存し、1件でも不合格ならnon-zeroで終了する。mock-only、unverified、非transformers artifactはここで拒否される。
+`compare`はmockを含むoffline bookkeeping向けの再現性比較であり、実機baselineの採用判定ではない。実機2 run後は必ず`qualify`を実行する。`qualify`は各runの分類・preflight・contract・source・dataset selection・prediction・metric・model artifactの内部整合性と、2 run間のrun ID、commit、tracked・staged・non-ignored untracked entryのないclean worktree、固定依存・GPU条件、各hash、予測、accuracy差を検査する。全checkの名前、期待値、実測値、理由、合否と総合`eligible`判定をJSONへ保存し、1件でも不合格ならnon-zeroで終了する。mock-only、unverified、非transformers artifactはここで拒否される。
 
 `baseline-qualification.json`の`eligible`がtrueであることを確認し、実機runのartifact path、commit、accuracy、同JSONをIssue #30へ記録する。falseの場合は不合格checkの`reason`を記録して停止し、artifactをbaselineとして採用しない。
 

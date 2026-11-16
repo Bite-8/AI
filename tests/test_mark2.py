@@ -2,6 +2,7 @@ import json
 import hashlib
 import io
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -9,14 +10,14 @@ from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
-from mark2 import run
+from mark2 import environment, run
 from mark2.config import (
     read_config,
     read_experiment_contract,
     validate_config,
     validate_experiment_contract,
 )
-from mark2.environment import evaluate_preflight, read_profile
+from mark2.environment import evaluate_preflight, git_worktree_evidence, read_profile
 
 
 EXPECTED_COMMIT = run.command(
@@ -174,7 +175,7 @@ class FakeProbe:
     def __init__(self, **overrides):
         self.values = {
             "git_commit": EXPECTED_COMMIT,
-            "git_tracked_status": "",
+            "git_worktree_status": "",
             "python_version": [3, 10, 14],
             "packages": {
                 "accelerate": "1.15.0",
@@ -197,6 +198,64 @@ class FakeProbe:
 
     def snapshot(self):
         return deepcopy(self.values)
+
+
+class WorktreeEvidenceTests(unittest.TestCase):
+    def make_repository(self, root):
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        (root / ".gitignore").write_text(
+            "artifacts/\n.venv/\n__pycache__/\n*.log\n", encoding="utf-8"
+        )
+        (root / "tracked.py").write_text("original\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", ".gitignore", "tracked.py"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture"], check=True)
+
+    def test_reports_tracked_staged_and_nonignored_untracked_entries(self):
+        cases = {
+            "tracked": ("M tracked.py", lambda root: (root / "tracked.py").write_text("changed\n", encoding="utf-8")),
+            "staged": ("A  staged.py", lambda root: (
+                (root / "staged.py").write_text("staged\n", encoding="utf-8"),
+                subprocess.run(["git", "-C", str(root), "add", "staged.py"], check=True),
+            )),
+            "untracked_file": ("?? loose.py", lambda root: (root / "loose.py").write_text("loose\n", encoding="utf-8")),
+            "untracked_directory": ("?? loose/nested.py", lambda root: (
+                (root / "loose").mkdir(),
+                (root / "loose" / "nested.py").write_text("nested\n", encoding="utf-8"),
+            )),
+        }
+        for name, (expected, mutate) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                self.make_repository(root)
+                mutate(root)
+                self.assertIn(expected, git_worktree_evidence(root).splitlines())
+
+    def test_ignored_generated_entries_preserve_clean_evidence(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self.make_repository(root)
+            for path in (
+                root / "artifacts" / "result.json",
+                root / ".venv" / "state",
+                root / "__pycache__" / "module.pyc",
+                root / "run.log",
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("generated\n", encoding="utf-8")
+            self.assertEqual(git_worktree_evidence(root), "")
+
+    def test_command_failure_and_non_text_output_fail_closed(self):
+        cases = (
+            {"status": "error", "returncode": 128},
+            {"status": "ok", "output": None},
+        )
+        for result in cases:
+            with self.subTest(result=result), patch.object(environment, "command", return_value=result):
+                evidence = git_worktree_evidence(Path("/unused"))
+                self.assertIsInstance(evidence, dict)
+                self.assertNotEqual(evidence, "")
 
 
 class ConfigTests(unittest.TestCase):
@@ -548,7 +607,7 @@ class ArtifactTests(unittest.TestCase):
             output = "" if "status" in args else EXPECTED_COMMIT
             return {"status": "ok", "output": output}
 
-        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command):
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command), patch.object(run, "git_worktree_evidence", return_value=""):
             root = Path(folder)
             first = run.execute_run(
                 config,
@@ -573,6 +632,8 @@ class ArtifactTests(unittest.TestCase):
             manifest = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["git_commit"], EXPECTED_COMMIT)
             self.assertEqual(manifest["git_status"], "")
+            self.assertIn("__init__.py", manifest["source_sha256"])
+            self.assertTrue((first / "source" / "__init__.py").is_file())
 
     def test_qualification_rejects_missing_required_snapshot_file_and_manifest_entry(self):
         config = read_config(run.DEFAULT_CONFIG)
@@ -581,7 +642,7 @@ class ArtifactTests(unittest.TestCase):
             output = "" if "status" in args else EXPECTED_COMMIT
             return {"status": "ok", "output": output}
 
-        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command):
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command), patch.object(run, "git_worktree_evidence", return_value=""):
             root = Path(folder)
             artifacts = [
                 run.execute_run(
@@ -596,9 +657,9 @@ class ArtifactTests(unittest.TestCase):
                 for run_id in ("first", "second")
             ]
             for artifact in artifacts:
-                (artifact / "source" / "config.py").unlink()
+                (artifact / "source" / "__init__.py").unlink()
                 manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
-                manifest["source_sha256"].pop("config.py")
+                manifest["source_sha256"].pop("__init__.py")
                 run.write_json(artifact / "manifest.json", manifest)
 
             result = run.qualify_baseline_runs(*artifacts)
@@ -616,7 +677,7 @@ class ArtifactTests(unittest.TestCase):
             output = "" if "status" in args else EXPECTED_COMMIT
             return {"status": "ok", "output": output}
 
-        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command):
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", side_effect=successful_git_command), patch.object(run, "git_worktree_evidence", return_value=""):
             root = Path(folder)
             artifacts = [
                 run.execute_run(
@@ -633,9 +694,9 @@ class ArtifactTests(unittest.TestCase):
             replacement = b"self-consistent but not committed source\n"
             replacement_hash = hashlib.sha256(replacement).hexdigest()
             for artifact in artifacts:
-                (artifact / "source" / "run.py").write_bytes(replacement)
+                (artifact / "source" / "__init__.py").write_bytes(replacement)
                 manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
-                manifest["source_sha256"]["run.py"] = replacement_hash
+                manifest["source_sha256"]["__init__.py"] = replacement_hash
                 run.write_json(artifact / "manifest.json", manifest)
 
             result = run.qualify_baseline_runs(*artifacts)
@@ -702,7 +763,7 @@ class ArtifactTests(unittest.TestCase):
     def test_command_failure_cannot_qualify_as_git_evidence(self):
         config = read_config(run.DEFAULT_CONFIG)
         failed = {"status": "error", "returncode": 128}
-        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", return_value=failed):
+        with tempfile.TemporaryDirectory() as folder, patch.object(run, "command", return_value=failed), patch.object(run, "git_worktree_evidence", return_value=failed):
             root = Path(folder)
             first = run.execute_run(
                 config,
@@ -1066,6 +1127,9 @@ class ArtifactTests(unittest.TestCase):
             "incomplete": lambda manifest, rows: manifest.update(status="running"),
             "failed_preflight": lambda manifest, rows: manifest["preflight"].update(passed=False),
             "dirty_tree": lambda manifest, rows: manifest.update(git_status=" M mark2/run.py"),
+            "staged_tree": lambda manifest, rows: manifest.update(git_status="M  mark2/run.py"),
+            "untracked_file": lambda manifest, rows: manifest.update(git_status="?? mark2/local.py"),
+            "untracked_directory": lambda manifest, rows: manifest.update(git_status="?? mark2/local/module.py"),
             "contract_hash": lambda manifest, rows: manifest.update(contract_sha256="0" * 64),
             "source_hash": lambda manifest, rows: manifest["source_sha256"].update({"run.py": "0" * 64}),
             "dataset_hash": lambda manifest, rows: manifest["dataset_selection"].update(sha256="0" * 64),
@@ -1450,6 +1514,19 @@ class ExperimentQualificationTests(unittest.TestCase):
                     failed,
                 )
 
+    def test_each_of_four_runs_must_record_a_clean_worktree(self):
+        with tempfile.TemporaryDirectory() as folder:
+            artifacts = self.make_artifacts(Path(folder))
+            manifest_path = artifacts[3] / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["git_status"] = "?? mark2/local.py"
+            run.write_json(manifest_path, manifest)
+            result = run.qualify_experiment_artifacts(*artifacts)
+            self.assertFalse(result["eligible"])
+            failed = {check["name"] for check in result["checks"] if not check["passed"]}
+            self.assertIn("variant.pair.clean_worktree", failed)
+            self.assertIn("experiment.clean_worktrees", failed)
+
 
 class ExperimentEvaluationTests(unittest.TestCase):
     def make_artifacts(self, root):
@@ -1622,7 +1699,7 @@ class PreflightTests(unittest.TestCase):
     def test_each_host_contract_mismatch_is_rejected(self):
         cases = {
             "git_commit": {"git_commit": "b" * 40},
-            "git_tracked_files_clean": {"git_tracked_status": " M mark2/run.py"},
+            "git_worktree_clean": {"git_worktree_status": "?? mark2/local.py"},
             "python_version": {"python_version": [3, 9, 20]},
             "package:torch": {"packages": {**FakeProbe().values["packages"], "torch": "0.0.0"}},
             "cuda_available": {"accelerator": {"cuda_available": False, "bf16_supported": False, "gpu_count": 0, "gpus": []}},
@@ -1638,6 +1715,24 @@ class PreflightTests(unittest.TestCase):
                 self.assertFalse(result["passed"])
                 failures = {item["name"] for item in result["checks"] if not item["passed"]}
                 self.assertIn(expected_failure, failures)
+
+    def test_each_kind_of_worktree_change_is_rejected(self):
+        statuses = (
+            "M mark2/run.py",
+            "M  mark2/run.py",
+            "?? mark2/local.py",
+            "?? mark2/local/module.py",
+        )
+        for status in statuses:
+            with self.subTest(status=status):
+                result = evaluate_preflight(
+                    self.profile,
+                    EXPECTED_COMMIT,
+                    FakeProbe(git_worktree_status=status),
+                )
+                self.assertFalse(result["passed"])
+                failures = {item["name"] for item in result["checks"] if not item["passed"]}
+                self.assertIn("git_worktree_clean", failures)
 
     def test_failed_preflights_are_saved_without_overwrite(self):
         with tempfile.TemporaryDirectory() as folder:
