@@ -72,6 +72,8 @@ Repositoryが現在実装するAWS操作は、固定targetの`status`、通常�
 
 各runはcommit、作業ツリー、環境、依存、GPU、source hash、時間、peak memory、予測、metric、成否をrun ID別artifactへ保存する。作業ツリーはtracked・staged変更だけでなく、Gitがignoreしていないuntracked fileとdirectoryも含めて空でなければならない。artifact、virtual environment、log、bytecode等の生成物境界はRepositoryの`.gitignore`に従う。source snapshotにはrunnerが直接実行・importする`mark2/__init__.py`、`config.py`、`environment.py`、`run.py`、requirements、execution profileを保存する。mock結果は`mock-only`、未実行の実機結果は`unverified`として区別する。
 
+execution profileの7件のexact pinはmodel/dataset取得前に期待versionを判定するdirect dependency gateである。これとは別に、Python packaging metadataから隔離環境内の全installed distributionをcanonical project nameとversionの整列済みinventoryとして収集し、preflightの`observed.distribution_inventory`とrun manifestの`environment.distribution_inventory`へ保存する。metadata取得失敗、不正または空のname/version、canonical name重複はclean evidenceへ変換せず失敗する。qualificationは各run内で両inventoryのtyped schemaと一致を検査し、baseline 2 runでは完全一致、controlled experimentではbaseline/variant 4 runすべての完全一致を要求する。列挙順だけの違いは正規化するが、transitive distributionを含む追加・欠落・version差やartifact片側の改ざんは不適格であり、reportのinventory evidenceから差を確認できる。
+
 ## Controlled experiment contract
 
 variantを実行する前に、baseline評価契約とは別のcontrolled experiment contractを作成する。形式例は [`mark2/configs/experiment_contract_example.json`](../../mark2/configs/experiment_contract_example.json) である。この例はvalidatorとartifact記録の確認専用であり、実際の脳科学的仮説、variant結果、仮説支持を表さない。
@@ -116,7 +118,7 @@ python3 -m mark2.run evaluate-experiment \
   --output artifacts/mark2/experiment-evaluation.json
 ```
 
-位置引数はbaseline 2 run、variant 2 runの順である。`qualify-experiment`は各artifactに既存のrepository-measured検査を適用し、schema v2 contractの本体・canonical SHA-256・保存copy、全directory/run IDの一意性、4 runすべてのclean worktree evidenceとcommit/source同一性、固定環境、variantの事前登録済み予測再現条件、評価contract・sample順・target・prompt/model/runtime条件を検査する。
+位置引数はbaseline 2 run、variant 2 runの順である。`qualify-experiment`は各artifactに既存のrepository-measured検査を適用し、schema v2 contractの本体・canonical SHA-256・保存copy、全directory/run IDの一意性、4 runすべてのclean worktree evidenceとcommit/source同一性、完全なPython distribution inventoryを含む固定環境、variantの事前登録済み予測再現条件、評価contract・sample順・target・prompt/model/runtime条件を検査する。
 
 resource gateは保存済みartifactだけを使う。生成時間は各runの全predictionにある`generation_seconds`の合計で、baseline 2 runの算術平均をreferenceとし、variant run 1と2をそれぞれ倍率上限と比較する。memoryはrun 1同士・run 2同士でGPU indexを対応させ、`gpu_peak_allocated_bytes`のvariant-minus-baselineが全indexで上限以下かを検査する。GPU配列長の不一致、baseline referenceが0秒、欠落・不正・非有限な実測値はfail closedとなる。上限ちょうどは合格する。
 
@@ -180,7 +182,7 @@ python3 -m mark2.run preflight \
   --run-id baseline-preflight
 ```
 
-preflightは各条件の期待値、実測値、合否、理由を`artifacts/mark2/baseline-preflight/preflight.json`へ保存する。全条件合格時だけexit code 0となる。失敗時もartifactは残り、同じrun IDでは上書きしない。CPU-only hostで実行した場合はCUDA/GPU条件を理由としてdownload前にnon-zeroで停止する。
+preflightは各条件の期待値、実測値、合否、理由に加え、全installed Python distributionのinventoryを`artifacts/mark2/baseline-preflight/preflight.json`へ保存する。全条件合格時だけexit code 0となる。失敗時もartifactは残り、同じrun IDでは上書きしない。CPU-only hostで実行した場合はCUDA/GPU条件を理由としてdownload前にnon-zeroで停止する。
 
 preflightのJSONが合格であることを確認してから、同じcommit・machineで実機runを2回行う。本実行もdownload前に同じgateを再評価するため、承認commitを各runへ渡す。
 
@@ -199,7 +201,7 @@ python3 -m mark2.run qualify \
   --output artifacts/mark2/baseline-qualification.json
 ```
 
-`compare`はmockを含むoffline bookkeeping向けの再現性比較であり、実機baselineの採用判定ではない。実機2 run後は必ず`qualify`を実行する。`qualify`は各runの分類・preflight・contract・source・dataset selection・prediction・metric・model artifactの内部整合性と、2 run間のrun ID、commit、tracked・staged・non-ignored untracked entryのないclean worktree、固定依存・GPU条件、各hash、予測、accuracy差を検査する。全checkの名前、期待値、実測値、理由、合否と総合`eligible`判定をJSONへ保存し、1件でも不合格ならnon-zeroで終了する。mock-only、unverified、非transformers artifactはここで拒否される。
+`compare`はmockを含むoffline bookkeeping向けの再現性比較であり、実機baselineの採用判定ではない。実機2 run後は必ず`qualify`を実行する。`qualify`は各runの分類・preflight・contract・source・dataset selection・prediction・metric・model artifact、manifest/preflight間の完全distribution inventoryの内部整合性と、2 run間のrun ID、commit、tracked・staged・non-ignored untracked entryのないclean worktree、direct dependency・完全distribution inventory・GPU条件、各hash、予測、accuracy差を検査する。全checkの名前、期待値、実測値、理由、合否と総合`eligible`判定をJSONへ保存し、1件でも不合格ならnon-zeroで終了する。mock-only、unverified、非transformers artifactはここで拒否される。
 
 `baseline-qualification.json`の`eligible`がtrueであることを確認し、実機runのartifact path、commit、accuracy、同JSONをIssue #30へ記録する。falseの場合は不合格checkの`reason`を記録して停止し、artifactをbaselineとして採用しない。
 

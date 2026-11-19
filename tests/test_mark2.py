@@ -23,6 +23,7 @@ from mark2.environment import evaluate_preflight, git_worktree_evidence, read_pr
 EXPECTED_COMMIT = run.command(
     ["git", "-C", str(run.REPOSITORY_ROOT), "rev-parse", "HEAD"]
 )["output"]
+TEST_DISTRIBUTION_INVENTORY = environment.distribution_inventory()
 PREDICTIVE_EXPERIMENT_CONTRACT = (
     run.PACKAGE_DIR / "configs" / "predictive_error_extrapolation_v1.json"
 )
@@ -69,7 +70,7 @@ def make_measured_artifact(path, run_id):
         "contract": config,
         "git_commit": EXPECTED_COMMIT,
         "git_status": "",
-        "environment": {},
+        "environment": {"distribution_inventory": deepcopy(TEST_DISTRIBUTION_INVENTORY)},
         "source_sha256": source_hashes,
         "dataset_selection": {
             "count": len(rows),
@@ -186,6 +187,7 @@ class FakeProbe:
                 "torch": "2.14.0",
                 "transformers": "5.17.0",
             },
+            "distribution_inventory": deepcopy(TEST_DISTRIBUTION_INVENTORY),
             "disk_free_bytes": 200 * 1024**3,
             "accelerator": {
                 "cuda_available": True,
@@ -256,6 +258,67 @@ class WorktreeEvidenceTests(unittest.TestCase):
                 evidence = git_worktree_evidence(Path("/unused"))
                 self.assertIsInstance(evidence, dict)
                 self.assertNotEqual(evidence, "")
+
+
+class DistributionInventoryTests(unittest.TestCase):
+    class Distribution:
+        def __init__(self, name, version):
+            self.metadata = {"Name": name}
+            self.version = version
+
+    def test_collection_canonicalizes_and_sorts_enumeration(self):
+        distributions = [
+            self.Distribution("Zed_Package", "2.0+cpu"),
+            self.Distribution("alpha.package", "1.0"),
+        ]
+        with patch.object(environment.importlib.metadata, "distributions", return_value=distributions):
+            self.assertEqual(
+                environment.distribution_inventory(),
+                [
+                    {"name": "alpha-package", "version": "1.0"},
+                    {"name": "zed-package", "version": "2.0+cpu"},
+                ],
+            )
+
+    def test_collection_rejects_duplicates_invalid_metadata_and_failures(self):
+        class BrokenDistribution:
+            @property
+            def metadata(self):
+                raise OSError("unreadable")
+
+        cases = (
+            ([], ValueError),
+            ([self.Distribution("same_name", "1"), self.Distribution("same-name", "2")], ValueError),
+            ([self.Distribution("bad name", "1")], ValueError),
+            ([self.Distribution("valid", "bad version")], ValueError),
+            ([BrokenDistribution()], RuntimeError),
+        )
+        for distributions, error in cases:
+            with self.subTest(distributions=distributions), patch.object(
+                environment.importlib.metadata, "distributions", return_value=distributions
+            ):
+                with self.assertRaises(error):
+                    environment.distribution_inventory()
+
+    def test_saved_inventory_schema_rejects_duplicates_and_accepts_order_differences(self):
+        expected = [
+            {"name": "alpha", "version": "1"},
+            {"name": "zed", "version": "2"},
+        ]
+        self.assertEqual(
+            environment.normalize_distribution_inventory(list(reversed(expected))),
+            expected,
+        )
+        invalid = (
+            [],
+            [{"name": "alpha", "version": "1"}, {"name": "alpha", "version": "2"}],
+            [{"name": "Alpha", "version": "1"}],
+            [{"name": "alpha", "version": ""}],
+            [{"name": "alpha", "version": "1", "extra": True}],
+        )
+        for value in invalid:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                environment.normalize_distribution_inventory(value)
 
 
 class ConfigTests(unittest.TestCase):
@@ -599,6 +662,94 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(result["mode"], "repository-measured-baseline-qualification")
             self.assertTrue(result["checks"])
             self.assertTrue(all({"name", "expected", "actual", "passed", "reason"} == set(item) for item in result["checks"]))
+
+    def test_distribution_inventory_requires_run_internal_and_pair_consistency(self):
+        mutations = {
+            "added": lambda inventory: inventory.append(
+                {"name": "transitive-only", "version": "1.0"}
+            ),
+            "missing": lambda inventory: inventory.pop(),
+            "version": lambda inventory: inventory[-1].update(version="changed"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                first, second = root / "first", root / "second"
+                make_measured_artifact(first, "first")
+                make_measured_artifact(second, "second")
+
+                manifest_path = second / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                mutate(manifest["environment"]["distribution_inventory"])
+                run.write_json(manifest_path, manifest)
+                result = run.qualify_baseline_runs(first, second)
+                failed = {check["name"] for check in result["checks"] if not check["passed"]}
+                self.assertIn("run2.distribution_inventory", failed)
+                self.assertIn("pair.same_distribution_inventory", failed)
+
+                preflight_path = second / "preflight.json"
+                preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+                mutate(preflight["observed"]["distribution_inventory"])
+                run.write_json(preflight_path, preflight)
+                result = run.qualify_baseline_runs(first, second)
+                failed = {check["name"] for check in result["checks"] if not check["passed"]}
+                self.assertNotIn("run2.distribution_inventory", failed)
+                self.assertIn("pair.same_distribution_inventory", failed)
+
+    def test_distribution_inventory_order_is_canonical_but_invalid_schema_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first, second = root / "first", root / "second"
+            make_measured_artifact(first, "first")
+            make_measured_artifact(second, "second")
+            for filename, path in (("manifest.json", second), ("preflight.json", second)):
+                value = json.loads((path / filename).read_text(encoding="utf-8"))
+                inventory = (
+                    value["environment"]["distribution_inventory"]
+                    if filename == "manifest.json"
+                    else value["observed"]["distribution_inventory"]
+                )
+                inventory.reverse()
+                run.write_json(path / filename, value)
+            result = run.qualify_baseline_runs(first, second)
+            inventory_checks = {
+                check["name"]: check["passed"]
+                for check in result["checks"]
+                if "distribution_inventory" in check["name"]
+            }
+            self.assertTrue(all(inventory_checks.values()))
+
+            manifest_path = second / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["environment"]["distribution_inventory"].append(
+                deepcopy(manifest["environment"]["distribution_inventory"][0])
+            )
+            run.write_json(manifest_path, manifest)
+            result = run.qualify_baseline_runs(first, second)
+            failed = {check["name"] for check in result["checks"] if not check["passed"]}
+            self.assertIn("run2.distribution_inventory", failed)
+
+    def test_experiment_requires_one_distribution_inventory_across_four_runs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            artifacts = [root / f"run-{index}" for index in range(4)]
+            for index, artifact in enumerate(artifacts):
+                make_measured_artifact(artifact, f"run-{index}")
+                attach_experiment_contract(artifact, read_experiment_contract(PREDICTIVE_EXPERIMENT_CONTRACT))
+            for artifact in artifacts[2:]:
+                for filename in ("manifest.json", "preflight.json"):
+                    path = artifact / filename
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                    inventory = (
+                        value["environment"]["distribution_inventory"]
+                        if filename == "manifest.json"
+                        else value["observed"]["distribution_inventory"]
+                    )
+                    inventory.append({"name": "variant-transitive", "version": "1.0"})
+                    run.write_json(path, value)
+            result = run.qualify_experiment_artifacts(*artifacts)
+            failed = {check["name"] for check in result["checks"] if not check["passed"]}
+            self.assertIn("experiment.same_distribution_inventory", failed)
 
     def test_execute_run_artifacts_are_qualified(self):
         config = read_config(run.DEFAULT_CONFIG)
