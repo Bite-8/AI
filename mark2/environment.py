@@ -24,7 +24,7 @@ PACKAGE_NAMES = (
     "botocore",
 )
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-PROJECT_NAME = re.compile(r"^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$")
+PROJECT_NAME = re.compile(r"^[A-Za-z0-9]+(?:[._-]+[A-Za-z0-9]+)*$")
 VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.!+_-]*$")
 
 

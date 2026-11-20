@@ -269,7 +269,7 @@ class DistributionInventoryTests(unittest.TestCase):
     def test_collection_canonicalizes_and_sorts_enumeration(self):
         distributions = [
             self.Distribution("Zed_Package", "2.0+cpu"),
-            self.Distribution("alpha.package", "1.0"),
+            self.Distribution("alpha._-package", "1.0"),
         ]
         with patch.object(environment.importlib.metadata, "distributions", return_value=distributions):
             self.assertEqual(
@@ -288,7 +288,10 @@ class DistributionInventoryTests(unittest.TestCase):
 
         cases = (
             ([], ValueError),
-            ([self.Distribution("same_name", "1"), self.Distribution("same-name", "2")], ValueError),
+            (
+                [self.Distribution("same_name", "1"), self.Distribution("same--..__name", "2")],
+                ValueError,
+            ),
             ([self.Distribution("bad name", "1")], ValueError),
             ([self.Distribution("valid", "bad version")], ValueError),
             ([BrokenDistribution()], RuntimeError),
