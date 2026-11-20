@@ -24,6 +24,8 @@ PACKAGE_NAMES = (
     "botocore",
 )
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+PROJECT_NAME = re.compile(r"^[A-Za-z0-9]+(?:[._-]+[A-Za-z0-9]+)*$")
+VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.!+_-]*$")
 
 
 def command(args: list[str], timeout: int = 10) -> dict[str, Any]:
@@ -69,6 +71,59 @@ def _packages() -> dict[str, str | None]:
     return packages
 
 
+def distribution_inventory() -> list[dict[str, str]]:
+    """Return every installed distribution as canonical, deterministic evidence."""
+    inventory: list[dict[str, str]] = []
+    seen: set[str] = set()
+    try:
+        distributions = importlib.metadata.distributions()
+        for distribution in distributions:
+            raw_name = distribution.metadata["Name"]
+            version = distribution.version
+            if not isinstance(raw_name, str) or not PROJECT_NAME.fullmatch(raw_name):
+                raise ValueError("distribution metadata contains an invalid project name")
+            if not isinstance(version, str) or not VERSION.fullmatch(version):
+                raise ValueError(f"distribution {raw_name!r} contains an invalid version")
+            name = re.sub(r"[-_.]+", "-", raw_name).lower()
+            if name in seen:
+                raise ValueError(f"duplicate canonical distribution name: {name}")
+            seen.add(name)
+            inventory.append({"name": name, "version": version})
+    except (ValueError, TypeError):
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"failed to collect Python distribution metadata: {type(exc).__name__}") from exc
+    if not inventory:
+        raise ValueError("Python distribution inventory must not be empty")
+    return sorted(inventory, key=lambda item: item["name"])
+
+
+def normalize_distribution_inventory(value: Any) -> list[dict[str, str]]:
+    """Validate saved inventory evidence and normalize enumeration order."""
+    if not isinstance(value, list):
+        raise ValueError("distribution inventory must be a list")
+    if not value:
+        raise ValueError("distribution inventory must not be empty")
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"name", "version"}:
+            raise ValueError("distribution inventory entries require name and version")
+        name, version = item.get("name"), item.get("version")
+        if (
+            not isinstance(name, str)
+            or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name)
+            or not isinstance(version, str)
+            or not VERSION.fullmatch(version)
+        ):
+            raise ValueError("distribution inventory contains an invalid name or version")
+        if name in seen:
+            raise ValueError(f"duplicate canonical distribution name: {name}")
+        seen.add(name)
+        normalized.append({"name": name, "version": version})
+    return sorted(normalized, key=lambda item: item["name"])
+
+
 def collect(path: Path) -> dict[str, Any]:
     disk = shutil.disk_usage(path)
     return {
@@ -83,6 +138,7 @@ def collect(path: Path) -> dict[str, Any]:
             ["nvidia-smi", "--query-gpu=index,name,memory.total,driver_version", "--format=csv,noheader,nounits"]
         ),
         "packages": _packages(),
+        "distribution_inventory": distribution_inventory(),
     }
 
 
@@ -128,6 +184,7 @@ class SystemProbe:
             "git_worktree_status": worktree,
             "python_version": list(sys.version_info[:3]),
             "packages": _packages(),
+            "distribution_inventory": distribution_inventory(),
             "disk_free_bytes": disk.free,
             "accelerator": accelerator,
         }

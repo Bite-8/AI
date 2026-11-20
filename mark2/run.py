@@ -32,6 +32,7 @@ from .environment import (
     command,
     evaluate_preflight,
     git_worktree_evidence,
+    normalize_distribution_inventory,
     read_profile,
 )
 
@@ -592,6 +593,32 @@ class _SavedProbe:
         return self.observed
 
 
+def _artifact_distribution_inventory(
+    manifest: dict[str, Any] | None, preflight: dict[str, Any] | None
+) -> tuple[list[dict[str, str]] | None, dict[str, Any]]:
+    manifest_environment = manifest.get("environment") if isinstance(manifest, dict) else None
+    observed = preflight.get("observed") if isinstance(preflight, dict) else None
+    values = {
+        "manifest": manifest_environment.get("distribution_inventory")
+        if isinstance(manifest_environment, dict)
+        else None,
+        "preflight": observed.get("distribution_inventory") if isinstance(observed, dict) else None,
+    }
+    normalized: dict[str, list[dict[str, str]] | None] = {}
+    errors: dict[str, str] = {}
+    for source, value in values.items():
+        try:
+            normalized[source] = normalize_distribution_inventory(value)
+        except ValueError as exc:
+            normalized[source] = None
+            errors[source] = str(exc)
+    evidence = {"inventories": normalized, "errors": errors}
+    inventory = normalized.get("manifest")
+    if errors or inventory != normalized.get("preflight"):
+        return None, evidence
+    return inventory, evidence
+
+
 def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
     """Validate whether two artifacts are admissible repository-measured baselines."""
     fixed_contract = read_config(DEFAULT_CONFIG)
@@ -603,6 +630,7 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
     manifests: list[dict[str, Any] | None] = []
     preflights: list[dict[str, Any] | None] = []
     predictions: list[list[dict[str, Any]] | None] = []
+    distribution_inventories: list[list[dict[str, str]] | None] = []
 
     manifest_schema = {
         "schema_version": int,
@@ -645,6 +673,17 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
         manifests.append(manifest)
         preflights.append(preflight)
         predictions.append(rows)
+
+        inventory, inventory_evidence = _artifact_distribution_inventory(manifest, preflight)
+        distribution_inventories.append(inventory)
+        _qualification_check(
+            checks,
+            f"{prefix}.distribution_inventory",
+            "valid and identical manifest/preflight inventories",
+            inventory_evidence,
+            inventory is not None,
+            "manifest and preflight must contain the same complete canonical Python distribution inventory",
+        )
 
         for kind, error in (
             ("manifest", manifest_error),
@@ -1028,6 +1067,15 @@ def qualify_baseline_runs(first: Path, second: Path) -> dict[str, Any]:
             "accelerator": observed.get("accelerator") if isinstance(observed, dict) else None,
         })
     _qualification_check(checks, "pair.same_fixed_environment", "identical", fixed_host, fixed_host[0] == fixed_host[1] and fixed_host[0]["profile"] is not None, "dependency, Python, GPU, and execution profile conditions must match")
+    _qualification_check(
+        checks,
+        "pair.same_distribution_inventory",
+        "identical",
+        distribution_inventories,
+        distribution_inventories[0] is not None
+        and distribution_inventories[0] == distribution_inventories[1],
+        "both runs must use the same complete Python distribution inventory",
+    )
 
     signatures = []
     for rows in predictions:
@@ -1075,6 +1123,7 @@ def qualify_experiment_artifacts(
     preflights: list[dict[str, Any] | None] = []
     predictions: list[list[dict[str, Any]] | None] = []
     experiment_contracts: list[dict[str, Any] | None] = []
+    distribution_inventories: list[list[dict[str, str]] | None] = []
 
     baseline_result = qualify_baseline_runs(baseline_first, baseline_second)
     variant_result = qualify_baseline_runs(variant_first, variant_second)
@@ -1095,6 +1144,8 @@ def qualify_experiment_artifacts(
         manifests.append(manifest)
         preflights.append(preflight)
         predictions.append(rows)
+        inventory, _ = _artifact_distribution_inventory(manifest, preflight)
+        distribution_inventories.append(inventory)
 
         embedded = manifest.get("experiment_contract") if isinstance(manifest, dict) else None
         declared_hash = (
@@ -1277,6 +1328,15 @@ def qualify_experiment_artifacts(
         fixed_hosts,
         fixed_hosts[0]["profile"] is not None and all(value == fixed_hosts[0] for value in fixed_hosts),
         "all runs must use the same profile, Python, dependencies, and accelerator conditions",
+    )
+    _qualification_check(
+        checks,
+        "experiment.same_distribution_inventory",
+        "identical",
+        distribution_inventories,
+        distribution_inventories[0] is not None
+        and all(value == distribution_inventories[0] for value in distribution_inventories),
+        "all four runs must use the same complete Python distribution inventory",
     )
 
     pair_sources = {}
