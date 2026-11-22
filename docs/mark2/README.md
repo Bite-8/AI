@@ -70,9 +70,44 @@ Repositoryが現在実装するAWS操作は、固定targetの`status`、通常�
 - Metric: 最初の独立したA〜Dを採用するexact-match accuracy。parse不能は不正解
 - 再現条件: 独立2 runでcontract、question hashと予測列が同一、accuracy差0.0
 
-各runはcommit、作業ツリー、環境、依存、GPU、source hash、時間、peak memory、予測、metric、成否をrun ID別artifactへ保存する。作業ツリーはtracked・staged変更だけでなく、Gitがignoreしていないuntracked fileとdirectoryも含めて空でなければならない。artifact、virtual environment、log、bytecode等の生成物境界はRepositoryの`.gitignore`に従う。source snapshotにはrunnerが直接実行・importする`mark2/__init__.py`、`config.py`、`environment.py`、`run.py`、requirements、execution profileを保存する。mock結果は`mock-only`、未実行の実機結果は`unverified`として区別する。
+各runはcommit、作業ツリー、環境、依存、GPU、source hash、時間、peak memory、予測、metric、成否をrun ID別artifactへ保存する。作業ツリーはtracked・staged変更だけでなく、Gitがignoreしていないuntracked fileとdirectoryも含めて空でなければならない。artifact、virtual environment、log、bytecode等の生成物境界はRepositoryの`.gitignore`に従う。source snapshotにはrunnerが直接実行・importする`mark2/__init__.py`、`config.py`、`environment.py`、`dependency_lock.py`、`run.py`、direct requirements、dependency lock、hash付きrequirements、execution profileを保存する。mock結果は`mock-only`、未実行の実機結果は`unverified`として区別する。
 
 execution profileの7件のexact pinはmodel/dataset取得前に期待versionを判定するdirect dependency gateである。これとは別に、Python packaging metadataから隔離環境内の全installed distributionをcanonical project nameとversionの整列済みinventoryとして収集し、preflightの`observed.distribution_inventory`とrun manifestの`environment.distribution_inventory`へ保存する。metadata取得失敗、不正または空のname/version、canonical name重複はclean evidenceへ変換せず失敗する。qualificationは各run内で両inventoryのtyped schemaと一致を検査し、baseline 2 runでは完全一致、controlled experimentではbaseline/variant 4 runすべての完全一致を要求する。列挙順だけの違いは正規化するが、transitive distributionを含む追加・欠落・version差やartifact片側の改ざんは不適格であり、reportのinventory evidenceから差を確認できる。
+
+## 固定targetのPython dependency lock
+
+[`dependency-lock.json`](../../mark2/dependency-lock.json) は、固定targetであるLinux x86_64 / CPython 3.14（manylinux_2_28を互換性上限とするwheel集合）について、7件のdirect pinからpip 26.0が解決した全distribution、選択wheelのPyPI URLとSHA-256、target・source・resolver入力を固定するmachine-readable source of truthである。[`requirements.lock`](../../mark2/requirements.lock) は同じ内容を`pip --require-hashes`で直接利用するための派生fileで、validatorが全name/version/hashの完全一致を検査する。sdist、editable/local/VCS URL、追加index、hashなしentryは許可しない。
+
+役割は次のように分離する。
+
+- `requirements.txt`とexecution profile: model/dataset取得前に照合する7件のdirect dependency gate
+- `dependency-lock.json`と`requirements.lock`: 固定targetの隔離環境を同じtransitive closureと承認済みwheel contentから再構築する入力
+- preflight/manifestのdistribution inventory: 実際にrunした環境の全distributionを残す実測証拠
+
+環境構築前にnetworkやinstallを伴わないcheckを行い、固定target上ではhash検証を強制したlockだけを使う。`requirements.txt`を環境構築へ直接渡してresolverを暗黙に再実行してはならない。
+
+```bash
+python3 -m mark2.run check-dependency-lock
+python3 -m pip install --require-hashes -r mark2/requirements.lock
+```
+
+direct requirements、Python/OS/architecture/glibc、index/source境界のいずれかを変更する場合はlockを明示的に再生成し、82件のclosure、version、wheel filename、URL、hashのdiffをreviewする。生成環境にはpip 26.0を用意し、Repository rootでlock自身に記録された引数配列をshell解釈なしで実行してreportを作り、そのreportから2つのlock fileを生成する。
+
+```bash
+python3 -m pip --version  # pip 26.0であることを確認
+python3 - <<'PY'
+import json
+import subprocess
+
+lock = json.load(open("mark2/dependency-lock.json", encoding="utf-8"))
+subprocess.run(lock["generator"]["command"], check=True)
+PY
+python3 scripts/generate_mark2_dependency_lock.py /tmp/mark2-pip-report.json
+python3 -m mark2.run check-dependency-lock
+git diff -- mark2/dependency-lock.json mark2/requirements.lock
+```
+
+generatorはruntimeやpreflightで起動せず、lockを自動更新しない。再生成時は公開PyPIだけを使い、private indexやcredentialを追加しない。
 
 ## Controlled experiment contract
 

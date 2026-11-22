@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mark2 import environment, run
+from mark2 import dependency_lock
 from mark2.config import (
     read_config,
     read_experiment_contract,
@@ -349,6 +350,100 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(run.parse_answer("Answer: c"), "C")
         self.assertIsNone(run.parse_answer("CAB"))
         self.assertIsNone(run.parse_answer("unknown"))
+
+
+class DependencyLockTests(unittest.TestCase):
+    def setUp(self):
+        self.lock = json.loads(dependency_lock.DEFAULT_LOCK.read_text(encoding="utf-8"))
+        self.direct = dependency_lock.parse_direct_requirements(
+            dependency_lock.DEFAULT_DIRECT_REQUIREMENTS.read_text(encoding="utf-8")
+        )
+        self.profile = json.loads(dependency_lock.DEFAULT_PROFILE.read_text(encoding="utf-8"))
+        self.hashed = dependency_lock.DEFAULT_HASHED_REQUIREMENTS.read_text(encoding="utf-8")
+
+    def validate(self, lock=None, direct=None, profile=None, hashed=None):
+        return dependency_lock.validate_dependency_lock(
+            self.lock if lock is None else lock,
+            self.direct if direct is None else direct,
+            self.profile if profile is None else profile,
+            self.hashed if hashed is None else hashed,
+        )
+
+    def test_repository_lock_is_complete_and_matches_direct_inputs(self):
+        validated = self.validate()
+        self.assertEqual(validated["resolution"]["package_count"], 82)
+        self.assertEqual(
+            set(self.direct),
+            {entry["name"] for entry in validated["direct_requirements"]},
+        )
+        result = subprocess.run(
+            [sys.executable, "-m", "mark2.run", "check-dependency-lock"],
+            cwd=run.REPOSITORY_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["package_count"], 82)
+
+    def test_direct_pin_difference_and_transitive_omission_fail_closed(self):
+        direct = dict(self.direct)
+        direct["torch"] = "0.0.0"
+        with self.assertRaisesRegex(ValueError, "direct pins differ"):
+            self.validate(direct=direct)
+
+        lock = deepcopy(self.lock)
+        lock["packages"] = [entry for entry in lock["packages"] if entry["name"] != "anyio"]
+        with self.assertRaisesRegex(ValueError, "resolution package manifest"):
+            self.validate(lock=lock)
+
+    def test_canonical_duplicates_floating_versions_and_hashes_are_rejected(self):
+        lock = deepcopy(self.lock)
+        lock["packages"].append(deepcopy(lock["packages"][0]))
+        with self.assertRaisesRegex(ValueError, "duplicate canonical"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"][0]["version"] = ">=1.0"
+        with self.assertRaisesRegex(ValueError, "exact version"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"][0]["artifact"]["sha256"] = "not-a-hash"
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            self.validate(lock=lock)
+
+        first = next(line for line in self.hashed.splitlines() if " --hash=" in line)
+        without_hash = self.hashed.replace(first, first.split(" --hash=")[0], 1)
+        with self.assertRaisesRegex(ValueError, "one SHA-256 hash"):
+            self.validate(hashed=without_hash)
+
+    def test_unapproved_sources_urls_and_requirement_forms_are_rejected(self):
+        lock = deepcopy(self.lock)
+        lock["source"]["index_url"] = "https://example.invalid/simple"
+        with self.assertRaisesRegex(ValueError, "approved PyPI"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"][0]["artifact"]["url"] = "git+https://example.invalid/project.git"
+        with self.assertRaisesRegex(ValueError, "approved PyPI file URL"):
+            self.validate(lock=lock)
+
+        first = next(line for line in self.hashed.splitlines() if " --hash=" in line)
+        vcs = self.hashed.replace(first, "project @ git+https://example.invalid/project.git", 1)
+        with self.assertRaisesRegex(ValueError, "exact pin"):
+            self.validate(hashed=vcs)
+
+    def test_target_and_generator_drift_are_rejected(self):
+        lock = deepcopy(self.lock)
+        lock["target"]["python_version"] = "3.13"
+        with self.assertRaisesRegex(ValueError, "CPython 3.14"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["generator"]["command"].append("--extra-index-url=https://example.invalid/simple")
+        with self.assertRaisesRegex(ValueError, "additional package sources"):
+            self.validate(lock=lock)
 
 
 class ExperimentContractTests(unittest.TestCase):
