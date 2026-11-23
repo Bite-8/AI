@@ -58,6 +58,55 @@ def _exact_version(value: Any, label: str) -> str:
     return value
 
 
+def _normalized_wheel_version(value: str) -> tuple[tuple[int, ...], str] | None:
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)*)(.*)", value.replace("_", "-"))
+    if not match:
+        return None
+    release = [int(item) for item in match.group(1).split(".")]
+    while len(release) > 1 and release[-1] == 0:
+        release.pop()
+    return tuple(release), match.group(2).lower()
+
+
+def _parse_wheel_filename(filename: str, name: str, version: str, label: str) -> tuple[str, str, str]:
+    if not filename.endswith(".whl") or "/" in filename:
+        raise ValueError(f"{label} must be one wheel filename")
+    parts = filename[:-4].split("-")
+    if len(parts) not in (5, 6):
+        raise ValueError(f"{label} must follow the wheel filename convention")
+    wheel_name, wheel_version = parts[0], parts[1]
+    if canonical_project_name(wheel_name.replace("_", "-"), label) != name:
+        raise ValueError(f"{label} project name does not match the package entry")
+    if _normalized_wheel_version(wheel_version) != _normalized_wheel_version(version):
+        raise ValueError(f"{label} version does not match the package entry")
+    return tuple(parts[-3:])
+
+
+def _wheel_targets_fixed_runtime(python_tag: str, abi_tag: str, platform_tag: str) -> bool:
+    python_tags = set(python_tag.split("."))
+    abi_tags = set(abi_tag.split("."))
+    platform_tags = set(platform_tag.split("."))
+    python_compatible = bool(python_tags & {"py3", "py314", "cp314"})
+    python_compatible = python_compatible or any(
+        tag.startswith("cp") and tag[2:].isdigit() and int(tag[2:]) <= 314 and "abi3" in abi_tags
+        for tag in python_tags
+    )
+    if not python_compatible:
+        return False
+    if python_tags & {"py3", "py314"} and "none" not in abi_tags:
+        return False
+    if "cp314" in python_tags and not (abi_tags & {"cp314", "abi3", "none"}):
+        return False
+
+    def compatible_platform(tag: str) -> bool:
+        if tag in {"any", "linux_x86_64", "manylinux1_x86_64", "manylinux2010_x86_64", "manylinux2014_x86_64"}:
+            return True
+        match = re.fullmatch(r"manylinux_2_([0-9]+)_x86_64", tag)
+        return bool(match and int(match.group(1)) <= 28)
+
+    return any(compatible_platform(tag) for tag in platform_tags)
+
+
 def parse_direct_requirements(text: str) -> dict[str, str]:
     requirements: dict[str, str] = {}
     for number, raw in enumerate(text.splitlines(), 1):
@@ -185,8 +234,9 @@ def validate_dependency_lock(
     if not isinstance(package_entries, list) or not package_entries:
         raise ValueError("packages must be a non-empty array")
     packages: dict[str, tuple[str, str]] = {}
+    dependency_edges: dict[str, list[str]] = {}
     for index, entry in enumerate(package_entries):
-        entry = _exact_keys(entry, {"name", "version", "artifact"}, f"packages[{index}]")
+        entry = _exact_keys(entry, {"name", "version", "dependencies", "artifact"}, f"packages[{index}]")
         name = canonical_project_name(entry["name"], f"packages[{index}].name")
         if name in packages:
             raise ValueError(f"dependency lock contains duplicate canonical project name: {name}")
@@ -195,8 +245,13 @@ def validate_dependency_lock(
         filename = artifact["filename"]
         url = artifact["url"]
         digest = artifact["sha256"]
-        if not isinstance(filename, str) or not filename.endswith(".whl") or "/" in filename:
-            raise ValueError(f"packages[{index}] artifact must be one wheel filename")
+        if not isinstance(filename, str):
+            raise ValueError(f"packages[{index}] artifact filename must be a string")
+        python_tag, abi_tag, platform_tag = _parse_wheel_filename(
+            filename, name, version, f"packages[{index}] artifact filename"
+        )
+        if not _wheel_targets_fixed_runtime(python_tag, abi_tag, platform_tag):
+            raise ValueError(f"packages[{index}] artifact wheel is incompatible with the fixed target")
         if not isinstance(url, str):
             raise ValueError(f"packages[{index}] artifact URL must be a string")
         parsed = urlparse(url)
@@ -210,7 +265,16 @@ def validate_dependency_lock(
             raise ValueError(f"packages[{index}] artifact must use the approved PyPI file URL")
         if not isinstance(digest, str) or not SHA256.fullmatch(digest):
             raise ValueError(f"packages[{index}] artifact must have one lowercase SHA-256")
+        dependencies = entry["dependencies"]
+        if not isinstance(dependencies, list):
+            raise ValueError(f"packages[{index}].dependencies must be an array")
+        checked_dependencies = [
+            canonical_project_name(value, f"packages[{index}].dependencies") for value in dependencies
+        ]
+        if checked_dependencies != sorted(set(checked_dependencies)):
+            raise ValueError(f"packages[{index}].dependencies must be sorted and unique")
         packages[name] = (version, digest)
+        dependency_edges[name] = checked_dependencies
 
     resolution = _exact_keys(lock["resolution"], {"package_count", "package_names"}, "resolution")
     names = sorted(packages)
@@ -222,6 +286,29 @@ def validate_dependency_lock(
     for name, version in direct_requirements.items():
         if packages[name][0] != version:
             raise ValueError(f"locked direct requirement version differs for {name}")
+    missing_dependencies = sorted(
+        {dependency for dependencies in dependency_edges.values() for dependency in dependencies}
+        - set(packages)
+    )
+    if missing_dependencies:
+        raise ValueError(
+            "locked dependency closure is missing resolver dependencies: "
+            + ", ".join(missing_dependencies)
+        )
+    reachable = set(direct_requirements)
+    pending = list(reachable)
+    while pending:
+        package = pending.pop()
+        for dependency in dependency_edges[package]:
+            if dependency not in reachable:
+                reachable.add(dependency)
+                pending.append(dependency)
+    unreachable = sorted(set(packages) - reachable)
+    if unreachable:
+        raise ValueError(
+            "locked dependency closure contains packages unreachable from direct requirements: "
+            + ", ".join(unreachable)
+        )
 
     hashed = parse_hashed_requirements(hashed_requirements_text)
     if hashed != packages:

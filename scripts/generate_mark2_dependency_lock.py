@@ -9,6 +9,13 @@ import re
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 
+try:
+    from packaging.markers import default_environment
+    from packaging.requirements import Requirement
+except ModuleNotFoundError:  # pip vendors packaging in the approved generation environment.
+    from pip._vendor.packaging.markers import default_environment
+    from pip._vendor.packaging.requirements import Requirement
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = ROOT / "mark2"
@@ -16,6 +23,59 @@ PACKAGE_DIR = ROOT / "mark2"
 
 def canonical_name(value: str) -> str:
     return re.sub(r"[-_.]+", "-", value).lower()
+
+
+def target_environment() -> dict[str, str]:
+    environment = default_environment()
+    environment.update(
+        {
+            "implementation_name": "cpython",
+            "platform_machine": "x86_64",
+            "platform_python_implementation": "CPython",
+            "platform_system": "Linux",
+            "python_full_version": "3.14.0",
+            "python_version": "3.14",
+            "sys_platform": "linux",
+            "extra": "",
+        }
+    )
+    return environment
+
+
+def dependency_graph(items: list[dict], direct_names: set[str]) -> dict[str, list[str]]:
+    metadata = {canonical_name(item["metadata"]["name"]): item["metadata"] for item in items}
+    dependencies: dict[str, set[str]] = {name: set() for name in metadata}
+    requested_extras: dict[str, set[str]] = {name: set() for name in metadata}
+    expanded: dict[str, frozenset[str]] = {}
+    pending = list(direct_names)
+    while pending:
+        name = pending.pop()
+        if name not in metadata:
+            raise ValueError(f"resolver report is missing dependency metadata for {name}")
+        extras = frozenset(requested_extras[name])
+        if expanded.get(name) == extras:
+            continue
+        expanded[name] = extras
+        for raw in metadata[name].get("requires_dist") or []:
+            requirement = Requirement(raw)
+            environments = []
+            for extra in {"", *extras}:
+                environment = target_environment()
+                environment["extra"] = extra
+                environments.append(environment)
+            if requirement.marker and not any(
+                requirement.marker.evaluate(environment=environment) for environment in environments
+            ):
+                continue
+            dependency = canonical_name(requirement.name)
+            if dependency not in metadata:
+                raise ValueError(f"resolver report is missing selected dependency {dependency}")
+            dependencies[name].add(dependency)
+            new_extras = set(requirement.extras) - requested_extras[dependency]
+            if dependency not in expanded or new_extras:
+                requested_extras[dependency].update(new_extras)
+                pending.append(dependency)
+    return {name: sorted(values) for name, values in dependencies.items()}
 
 
 def resolver_command() -> list[str]:
@@ -45,15 +105,25 @@ def resolver_command() -> list[str]:
 def build_lock(report: dict) -> dict:
     if report.get("version") != "1" or report.get("pip_version") != "26.0":
         raise ValueError("report must be a pip 26.0 installation report version 1")
+    direct = []
+    for raw in (PACKAGE_DIR / "requirements.txt").read_text(encoding="utf-8").splitlines():
+        if raw and not raw.startswith("#"):
+            name, version = raw.split("==")
+            direct.append({"name": canonical_name(name), "version": version})
+    direct.sort(key=lambda item: item["name"])
+    report_items = report.get("install", [])
+    dependency_edges = dependency_graph(report_items, {item["name"] for item in direct})
     packages = []
-    for item in report.get("install", []):
+    for item in report_items:
         download = item["download_info"]
         url = download["url"]
         hashes = download["archive_info"].get("hashes", {})
+        name = canonical_name(item["metadata"]["name"])
         packages.append(
             {
-                "name": canonical_name(item["metadata"]["name"]),
+                "name": name,
                 "version": item["metadata"]["version"],
+                "dependencies": dependency_edges[name],
                 "artifact": {
                     "filename": PurePosixPath(unquote(urlparse(url).path)).name,
                     "url": url,
@@ -62,12 +132,6 @@ def build_lock(report: dict) -> dict:
             }
         )
     packages.sort(key=lambda item: item["name"])
-    direct = []
-    for raw in (PACKAGE_DIR / "requirements.txt").read_text(encoding="utf-8").splitlines():
-        if raw and not raw.startswith("#"):
-            name, version = raw.split("==")
-            direct.append({"name": canonical_name(name), "version": version})
-    direct.sort(key=lambda item: item["name"])
     return {
         "schema_version": 1,
         "target": {

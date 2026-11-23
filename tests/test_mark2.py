@@ -376,6 +376,9 @@ class DependencyLockTests(unittest.TestCase):
             set(self.direct),
             {entry["name"] for entry in validated["direct_requirements"]},
         )
+        packages = {entry["name"]: entry for entry in validated["packages"]}
+        self.assertIn("aiohttp", packages["fsspec"]["dependencies"])
+        self.assertIn("nvidia-cuda-runtime", packages["cuda-toolkit"]["dependencies"])
         result = subprocess.run(
             [sys.executable, "-m", "mark2.run", "check-dependency-lock"],
             cwd=run.REPOSITORY_ROOT,
@@ -396,6 +399,16 @@ class DependencyLockTests(unittest.TestCase):
         lock["packages"] = [entry for entry in lock["packages"] if entry["name"] != "anyio"]
         with self.assertRaisesRegex(ValueError, "resolution package manifest"):
             self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"] = [entry for entry in lock["packages"] if entry["name"] != "anyio"]
+        lock["resolution"]["package_names"].remove("anyio")
+        lock["resolution"]["package_count"] -= 1
+        hashed = "\n".join(
+            line for line in self.hashed.splitlines() if not line.startswith("anyio==")
+        ) + "\n"
+        with self.assertRaisesRegex(ValueError, "missing resolver dependencies"):
+            self.validate(lock=lock, hashed=hashed)
 
     def test_canonical_duplicates_floating_versions_and_hashes_are_rejected(self):
         lock = deepcopy(self.lock)
@@ -433,6 +446,29 @@ class DependencyLockTests(unittest.TestCase):
         vcs = self.hashed.replace(first, "project @ git+https://example.invalid/project.git", 1)
         with self.assertRaisesRegex(ValueError, "exact pin"):
             self.validate(hashed=vcs)
+
+    def test_foreign_and_target_incompatible_wheels_are_rejected(self):
+        lock = deepcopy(self.lock)
+        foreign = deepcopy(lock["packages"][1]["artifact"])
+        lock["packages"][0]["artifact"] = foreign
+        with self.assertRaisesRegex(ValueError, "project name does not match"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"][0]["artifact"]["filename"] = "accelerate-0.0.0-py3-none-any.whl"
+        lock["packages"][0]["artifact"]["url"] = (
+            "https://files.pythonhosted.org/packages/accelerate-0.0.0-py3-none-any.whl"
+        )
+        with self.assertRaisesRegex(ValueError, "version does not match"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"][0]["artifact"]["filename"] = "accelerate-1.15.0-py3-none-win_amd64.whl"
+        lock["packages"][0]["artifact"]["url"] = (
+            "https://files.pythonhosted.org/packages/accelerate-1.15.0-py3-none-win_amd64.whl"
+        )
+        with self.assertRaisesRegex(ValueError, "incompatible with the fixed target"):
+            self.validate(lock=lock)
 
     def test_target_and_generator_drift_are_rejected(self):
         lock = deepcopy(self.lock)

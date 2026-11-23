@@ -76,7 +76,7 @@ execution profileの7件のexact pinはmodel/dataset取得前に期待versionを
 
 ## 固定targetのPython dependency lock
 
-[`dependency-lock.json`](../../mark2/dependency-lock.json) は、固定targetであるLinux x86_64 / CPython 3.14（manylinux_2_28を互換性上限とするwheel集合）について、7件のdirect pinからpip 26.0が解決した全distribution、選択wheelのPyPI URLとSHA-256、target・source・resolver入力を固定するmachine-readable source of truthである。[`requirements.lock`](../../mark2/requirements.lock) は同じ内容を`pip --require-hashes`で直接利用するための派生fileで、validatorが全name/version/hashの完全一致を検査する。sdist、editable/local/VCS URL、追加index、hashなしentryは許可しない。
+[`dependency-lock.json`](../../mark2/dependency-lock.json) は、固定targetであるLinux x86_64 / CPython 3.14（manylinux_2_28を互換性上限とするwheel集合）について、7件のdirect pinからpip 26.0が解決した全distribution、resolver metadata由来の依存edge、選択wheelのPyPI URLとSHA-256、target・source・resolver入力を固定するmachine-readable source of truthである。validatorは依存edgeからdirect rootのclosureを再計算し、欠落と到達不能entryを拒否する。またwheel filenameのproject/versionをentryへ結び付け、Python ABIとplatform tagが固定targetに適合することを検査する。[`requirements.lock`](../../mark2/requirements.lock) は同じ内容を`pip --require-hashes`で直接利用するための派生fileで、validatorが全name/version/hashの完全一致を検査する。sdist、editable/local/VCS URL、追加index、hashなしentryは許可しない。
 
 役割は次のように分離する。
 
@@ -91,7 +91,7 @@ python3 -m mark2.run check-dependency-lock
 python3 -m pip install --require-hashes -r mark2/requirements.lock
 ```
 
-direct requirements、Python/OS/architecture/glibc、index/source境界のいずれかを変更する場合はlockを明示的に再生成し、82件のclosure、version、wheel filename、URL、hashのdiffをreviewする。生成環境にはpip 26.0を用意し、Repository rootでlock自身に記録された引数配列をshell解釈なしで実行してreportを作り、そのreportから2つのlock fileを生成する。
+direct requirements、Python/OS/architecture/glibc、index/source境界のいずれかを変更する場合はlockを明示的に再生成し、82件のclosure、依存edge、version、wheel filename、URL、hashのdiffをreviewする。生成環境にはpip 26.0を用意し、Repository rootでlock自身に記録された引数配列をshell解釈なしで実行してreportを作り、そのreportから2つのlock fileを生成する。
 
 ```bash
 python3 -m pip --version  # pip 26.0であることを確認
