@@ -98,7 +98,7 @@ def resolver_command() -> list[str]:
         "--platform=manylinux1_x86_64",
         "--platform=linux_x86_64",
         "--index-url=https://pypi.org/simple",
-        "-r=mark2/requirements.txt",
+        "--requirement=mark2/requirements.txt",
     ]
 
 

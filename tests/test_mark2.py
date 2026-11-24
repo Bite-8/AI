@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from mark2 import environment, run
 from mark2 import dependency_lock
+from scripts import generate_mark2_dependency_lock
 from mark2.config import (
     read_config,
     read_experiment_contract,
@@ -389,6 +390,12 @@ class DependencyLockTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["package_count"], 82)
 
+    def test_recorded_resolver_command_matches_generator_and_uses_valid_requirement_option(self):
+        command = self.lock["generator"]["command"]
+        self.assertEqual(command, generate_mark2_dependency_lock.resolver_command())
+        self.assertIn("--requirement=mark2/requirements.txt", command)
+        self.assertNotIn("-r=mark2/requirements.txt", command)
+
     def test_direct_pin_difference_and_transitive_omission_fail_closed(self):
         direct = dict(self.direct)
         direct["torch"] = "0.0.0"
@@ -479,6 +486,13 @@ class DependencyLockTests(unittest.TestCase):
         lock = deepcopy(self.lock)
         lock["generator"]["command"].append("--extra-index-url=https://example.invalid/simple")
         with self.assertRaisesRegex(ValueError, "additional package sources"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["generator"]["command"][
+            lock["generator"]["command"].index("--requirement=mark2/requirements.txt")
+        ] = "-r=mark2/requirements.txt"
+        with self.assertRaisesRegex(ValueError, "missing --requirement"):
             self.validate(lock=lock)
 
 

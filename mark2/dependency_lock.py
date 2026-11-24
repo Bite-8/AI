@@ -194,7 +194,7 @@ def validate_dependency_lock(
         "--implementation=cp",
         "--abi=cp314",
         "--index-url=https://pypi.org/simple",
-        "-r=mark2/requirements.txt",
+        "--requirement=mark2/requirements.txt",
     ):
         if required not in generator["command"]:
             raise ValueError(f"generator.command is missing {required}")
