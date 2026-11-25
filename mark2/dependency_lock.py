@@ -35,6 +35,26 @@ EXPECTED_SOURCE = {
     "artifact_host": "files.pythonhosted.org",
     "only_binary": True,
 }
+EXPECTED_GENERATOR_COMMAND = (
+    "python3",
+    "-m",
+    "pip",
+    "install",
+    "--dry-run",
+    "--ignore-installed",
+    "--report=/tmp/mark2-pip-report.json",
+    "--only-binary=:all:",
+    "--implementation=cp",
+    "--python-version=3.14",
+    "--abi=cp314",
+    *(f"--platform=manylinux_2_{version}_x86_64" for version in range(28, 4, -1)),
+    "--platform=manylinux2014_x86_64",
+    "--platform=manylinux2010_x86_64",
+    "--platform=manylinux1_x86_64",
+    "--platform=linux_x86_64",
+    "--index-url=https://pypi.org/simple",
+    "--requirement=mark2/requirements.txt",
+)
 
 
 def _exact_keys(value: Any, expected: set[str], label: str) -> dict[str, Any]:
@@ -186,20 +206,10 @@ def validate_dependency_lock(
         isinstance(item, str) and item for item in generator["command"]
     ):
         raise ValueError("generator.command must be a non-empty string array")
-    command_text = " ".join(generator["command"])
-    for required in (
-        "--dry-run",
-        "--only-binary=:all:",
-        "--python-version=3.14",
-        "--implementation=cp",
-        "--abi=cp314",
-        "--index-url=https://pypi.org/simple",
-        "--requirement=mark2/requirements.txt",
-    ):
-        if required not in generator["command"]:
-            raise ValueError(f"generator.command is missing {required}")
-    if "--extra-index-url" in command_text or "--find-links" in command_text:
-        raise ValueError("generator.command must not use additional package sources")
+    if generator["command"] != list(EXPECTED_GENERATOR_COMMAND):
+        raise ValueError(
+            "generator.command must exactly match the approved canonical resolver command"
+        )
 
     profile = _exact_keys(
         profile,

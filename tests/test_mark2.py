@@ -485,15 +485,28 @@ class DependencyLockTests(unittest.TestCase):
 
         lock = deepcopy(self.lock)
         lock["generator"]["command"].append("--extra-index-url=https://example.invalid/simple")
-        with self.assertRaisesRegex(ValueError, "additional package sources"):
+        with self.assertRaisesRegex(ValueError, "approved canonical resolver command"):
             self.validate(lock=lock)
 
         lock = deepcopy(self.lock)
         lock["generator"]["command"][
             lock["generator"]["command"].index("--requirement=mark2/requirements.txt")
         ] = "-r=mark2/requirements.txt"
-        with self.assertRaisesRegex(ValueError, "missing --requirement"):
+        with self.assertRaisesRegex(ValueError, "approved canonical resolver command"):
             self.validate(lock=lock)
+
+        unapproved_arguments = (
+            "--index-url=https://example.invalid/simple",
+            "--requirement=/tmp/unreviewed.txt",
+            "--platform=win_amd64",
+            "--trusted-host=example.invalid",
+        )
+        for argument in unapproved_arguments:
+            with self.subTest(argument=argument):
+                lock = deepcopy(self.lock)
+                lock["generator"]["command"].append(argument)
+                with self.assertRaisesRegex(ValueError, "approved canonical resolver command"):
+                    self.validate(lock=lock)
 
 
 class ExperimentContractTests(unittest.TestCase):
