@@ -35,6 +35,13 @@ from .environment import (
     normalize_distribution_inventory,
     read_profile,
 )
+from .dependency_lock import (
+    DEFAULT_DIRECT_REQUIREMENTS,
+    DEFAULT_HASHED_REQUIREMENTS,
+    DEFAULT_LOCK,
+    dependency_lock_sha256,
+    read_dependency_lock,
+)
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -247,8 +254,11 @@ def _snapshot_sources(profile_path: Path = DEFAULT_PROFILE) -> tuple[Path, ...]:
         PACKAGE_DIR / "__init__.py",
         PACKAGE_DIR / "config.py",
         PACKAGE_DIR / "environment.py",
+        PACKAGE_DIR / "dependency_lock.py",
         PACKAGE_DIR / "run.py",
         PACKAGE_DIR / "requirements.txt",
+        DEFAULT_LOCK,
+        DEFAULT_HASHED_REQUIREMENTS,
         profile_path,
     )
 
@@ -1738,6 +1748,13 @@ def build_parser() -> argparse.ArgumentParser:
         "check-experiment-contract", help="validate an experiment contract without running a backend"
     )
     check_experiment.add_argument("--experiment-contract", type=Path, default=DEFAULT_EXPERIMENT_CONTRACT)
+    check_lock = commands.add_parser(
+        "check-dependency-lock", help="validate the fixed-target complete dependency lock offline"
+    )
+    check_lock.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
+    check_lock.add_argument("--requirements", type=Path, default=DEFAULT_DIRECT_REQUIREMENTS)
+    check_lock.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    check_lock.add_argument("--hashed-requirements", type=Path, default=DEFAULT_HASHED_REQUIREMENTS)
     preflight = commands.add_parser("preflight", help="validate the host without model or dataset downloads")
     preflight.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
     preflight.add_argument("--expected-commit", required=True)
@@ -1791,6 +1808,24 @@ def main() -> int:
         if args.command == "check-experiment-contract":
             contract = read_experiment_contract(args.experiment_contract)
             print(json.dumps({"valid": True, "experiment_contract_sha256": sha256_json(contract)}, indent=2))
+            return 0
+        if args.command == "check-dependency-lock":
+            lock = read_dependency_lock(
+                args.lock,
+                args.requirements,
+                args.profile,
+                args.hashed_requirements,
+            )
+            print(
+                json.dumps(
+                    {
+                        "valid": True,
+                        "package_count": len(lock["packages"]),
+                        "dependency_lock_sha256": dependency_lock_sha256(lock),
+                    },
+                    indent=2,
+                )
+            )
             return 0
         if args.command == "compare":
             result = compare_runs(args.first, args.second)

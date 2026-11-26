@@ -11,6 +11,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mark2 import environment, run
+from mark2 import dependency_lock
+from scripts import generate_mark2_dependency_lock
 from mark2.config import (
     read_config,
     read_experiment_contract,
@@ -349,6 +351,162 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(run.parse_answer("Answer: c"), "C")
         self.assertIsNone(run.parse_answer("CAB"))
         self.assertIsNone(run.parse_answer("unknown"))
+
+
+class DependencyLockTests(unittest.TestCase):
+    def setUp(self):
+        self.lock = json.loads(dependency_lock.DEFAULT_LOCK.read_text(encoding="utf-8"))
+        self.direct = dependency_lock.parse_direct_requirements(
+            dependency_lock.DEFAULT_DIRECT_REQUIREMENTS.read_text(encoding="utf-8")
+        )
+        self.profile = json.loads(dependency_lock.DEFAULT_PROFILE.read_text(encoding="utf-8"))
+        self.hashed = dependency_lock.DEFAULT_HASHED_REQUIREMENTS.read_text(encoding="utf-8")
+
+    def validate(self, lock=None, direct=None, profile=None, hashed=None):
+        return dependency_lock.validate_dependency_lock(
+            self.lock if lock is None else lock,
+            self.direct if direct is None else direct,
+            self.profile if profile is None else profile,
+            self.hashed if hashed is None else hashed,
+        )
+
+    def test_repository_lock_is_complete_and_matches_direct_inputs(self):
+        validated = self.validate()
+        self.assertEqual(validated["resolution"]["package_count"], 82)
+        self.assertEqual(
+            set(self.direct),
+            {entry["name"] for entry in validated["direct_requirements"]},
+        )
+        packages = {entry["name"]: entry for entry in validated["packages"]}
+        self.assertIn("aiohttp", packages["fsspec"]["dependencies"])
+        self.assertIn("nvidia-cuda-runtime", packages["cuda-toolkit"]["dependencies"])
+        result = subprocess.run(
+            [sys.executable, "-m", "mark2.run", "check-dependency-lock"],
+            cwd=run.REPOSITORY_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["package_count"], 82)
+
+    def test_recorded_resolver_command_matches_generator_and_uses_valid_requirement_option(self):
+        command = self.lock["generator"]["command"]
+        self.assertEqual(command, generate_mark2_dependency_lock.resolver_command())
+        self.assertIn("--requirement=mark2/requirements.txt", command)
+        self.assertNotIn("-r=mark2/requirements.txt", command)
+
+    def test_direct_pin_difference_and_transitive_omission_fail_closed(self):
+        direct = dict(self.direct)
+        direct["torch"] = "0.0.0"
+        with self.assertRaisesRegex(ValueError, "direct pins differ"):
+            self.validate(direct=direct)
+
+        lock = deepcopy(self.lock)
+        lock["packages"] = [entry for entry in lock["packages"] if entry["name"] != "anyio"]
+        with self.assertRaisesRegex(ValueError, "resolution package manifest"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"] = [entry for entry in lock["packages"] if entry["name"] != "anyio"]
+        lock["resolution"]["package_names"].remove("anyio")
+        lock["resolution"]["package_count"] -= 1
+        hashed = "\n".join(
+            line for line in self.hashed.splitlines() if not line.startswith("anyio==")
+        ) + "\n"
+        with self.assertRaisesRegex(ValueError, "missing resolver dependencies"):
+            self.validate(lock=lock, hashed=hashed)
+
+    def test_canonical_duplicates_floating_versions_and_hashes_are_rejected(self):
+        lock = deepcopy(self.lock)
+        lock["packages"].append(deepcopy(lock["packages"][0]))
+        with self.assertRaisesRegex(ValueError, "duplicate canonical"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"][0]["version"] = ">=1.0"
+        with self.assertRaisesRegex(ValueError, "exact version"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"][0]["artifact"]["sha256"] = "not-a-hash"
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            self.validate(lock=lock)
+
+        first = next(line for line in self.hashed.splitlines() if " --hash=" in line)
+        without_hash = self.hashed.replace(first, first.split(" --hash=")[0], 1)
+        with self.assertRaisesRegex(ValueError, "one SHA-256 hash"):
+            self.validate(hashed=without_hash)
+
+    def test_unapproved_sources_urls_and_requirement_forms_are_rejected(self):
+        lock = deepcopy(self.lock)
+        lock["source"]["index_url"] = "https://example.invalid/simple"
+        with self.assertRaisesRegex(ValueError, "approved PyPI"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"][0]["artifact"]["url"] = "git+https://example.invalid/project.git"
+        with self.assertRaisesRegex(ValueError, "approved PyPI file URL"):
+            self.validate(lock=lock)
+
+        first = next(line for line in self.hashed.splitlines() if " --hash=" in line)
+        vcs = self.hashed.replace(first, "project @ git+https://example.invalid/project.git", 1)
+        with self.assertRaisesRegex(ValueError, "exact pin"):
+            self.validate(hashed=vcs)
+
+    def test_foreign_and_target_incompatible_wheels_are_rejected(self):
+        lock = deepcopy(self.lock)
+        foreign = deepcopy(lock["packages"][1]["artifact"])
+        lock["packages"][0]["artifact"] = foreign
+        with self.assertRaisesRegex(ValueError, "project name does not match"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"][0]["artifact"]["filename"] = "accelerate-0.0.0-py3-none-any.whl"
+        lock["packages"][0]["artifact"]["url"] = (
+            "https://files.pythonhosted.org/packages/accelerate-0.0.0-py3-none-any.whl"
+        )
+        with self.assertRaisesRegex(ValueError, "version does not match"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["packages"][0]["artifact"]["filename"] = "accelerate-1.15.0-py3-none-win_amd64.whl"
+        lock["packages"][0]["artifact"]["url"] = (
+            "https://files.pythonhosted.org/packages/accelerate-1.15.0-py3-none-win_amd64.whl"
+        )
+        with self.assertRaisesRegex(ValueError, "incompatible with the fixed target"):
+            self.validate(lock=lock)
+
+    def test_target_and_generator_drift_are_rejected(self):
+        lock = deepcopy(self.lock)
+        lock["target"]["python_version"] = "3.13"
+        with self.assertRaisesRegex(ValueError, "CPython 3.14"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["generator"]["command"].append("--extra-index-url=https://example.invalid/simple")
+        with self.assertRaisesRegex(ValueError, "approved canonical resolver command"):
+            self.validate(lock=lock)
+
+        lock = deepcopy(self.lock)
+        lock["generator"]["command"][
+            lock["generator"]["command"].index("--requirement=mark2/requirements.txt")
+        ] = "-r=mark2/requirements.txt"
+        with self.assertRaisesRegex(ValueError, "approved canonical resolver command"):
+            self.validate(lock=lock)
+
+        unapproved_arguments = (
+            "--index-url=https://example.invalid/simple",
+            "--requirement=/tmp/unreviewed.txt",
+            "--platform=win_amd64",
+            "--trusted-host=example.invalid",
+        )
+        for argument in unapproved_arguments:
+            with self.subTest(argument=argument):
+                lock = deepcopy(self.lock)
+                lock["generator"]["command"].append(argument)
+                with self.assertRaisesRegex(ValueError, "approved canonical resolver command"):
+                    self.validate(lock=lock)
 
 
 class ExperimentContractTests(unittest.TestCase):

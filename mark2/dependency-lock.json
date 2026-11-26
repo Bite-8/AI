@@ -1,0 +1,1161 @@
+{
+  "direct_requirements": [
+    {
+      "name": "accelerate",
+      "version": "1.15.0"
+    },
+    {
+      "name": "boto3",
+      "version": "1.40.72"
+    },
+    {
+      "name": "botocore",
+      "version": "1.40.72"
+    },
+    {
+      "name": "datasets",
+      "version": "5.0.1"
+    },
+    {
+      "name": "safetensors",
+      "version": "0.8.0"
+    },
+    {
+      "name": "torch",
+      "version": "2.14.0"
+    },
+    {
+      "name": "transformers",
+      "version": "5.17.0"
+    }
+  ],
+  "generator": {
+    "command": [
+      "python3",
+      "-m",
+      "pip",
+      "install",
+      "--dry-run",
+      "--ignore-installed",
+      "--report=/tmp/mark2-pip-report.json",
+      "--only-binary=:all:",
+      "--implementation=cp",
+      "--python-version=3.14",
+      "--abi=cp314",
+      "--platform=manylinux_2_28_x86_64",
+      "--platform=manylinux_2_27_x86_64",
+      "--platform=manylinux_2_26_x86_64",
+      "--platform=manylinux_2_25_x86_64",
+      "--platform=manylinux_2_24_x86_64",
+      "--platform=manylinux_2_23_x86_64",
+      "--platform=manylinux_2_22_x86_64",
+      "--platform=manylinux_2_21_x86_64",
+      "--platform=manylinux_2_20_x86_64",
+      "--platform=manylinux_2_19_x86_64",
+      "--platform=manylinux_2_18_x86_64",
+      "--platform=manylinux_2_17_x86_64",
+      "--platform=manylinux_2_16_x86_64",
+      "--platform=manylinux_2_15_x86_64",
+      "--platform=manylinux_2_14_x86_64",
+      "--platform=manylinux_2_13_x86_64",
+      "--platform=manylinux_2_12_x86_64",
+      "--platform=manylinux_2_11_x86_64",
+      "--platform=manylinux_2_10_x86_64",
+      "--platform=manylinux_2_9_x86_64",
+      "--platform=manylinux_2_8_x86_64",
+      "--platform=manylinux_2_7_x86_64",
+      "--platform=manylinux_2_6_x86_64",
+      "--platform=manylinux_2_5_x86_64",
+      "--platform=manylinux2014_x86_64",
+      "--platform=manylinux2010_x86_64",
+      "--platform=manylinux1_x86_64",
+      "--platform=linux_x86_64",
+      "--index-url=https://pypi.org/simple",
+      "--requirement=mark2/requirements.txt"
+    ],
+    "name": "pip",
+    "version": "26.0"
+  },
+  "packages": [
+    {
+      "artifact": {
+        "filename": "accelerate-1.15.0-py3-none-any.whl",
+        "sha256": "97eacca0b73e45cb867dbf8c5d5d4dc32219544300e0c8992c7334dc2ef33cec",
+        "url": "https://files.pythonhosted.org/packages/8a/4c/34f0450479d01195027260da68d8a3880683f1640c3ca5adf64acb3185f1/accelerate-1.15.0-py3-none-any.whl"
+      },
+      "dependencies": [
+        "huggingface-hub",
+        "numpy",
+        "packaging",
+        "psutil",
+        "pyyaml",
+        "safetensors",
+        "torch"
+      ],
+      "name": "accelerate",
+      "version": "1.15.0"
+    },
+    {
+      "artifact": {
+        "filename": "aiohappyeyeballs-2.7.1-py3-none-any.whl",
+        "sha256": "9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472",
+        "url": "https://files.pythonhosted.org/packages/71/43/1947f06babed6b3f1d7f38b0c767f52df66bfb2bc10b468c4a7de9eceff2/aiohappyeyeballs-2.7.1-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "aiohappyeyeballs",
+      "version": "2.7.1"
+    },
+    {
+      "artifact": {
+        "filename": "aiohttp-3.14.5-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "94684b879ac1d71e4238850c99b62dc1b28d9086b156a2555f082010b85a865c",
+        "url": "https://files.pythonhosted.org/packages/a6/66/55a8904b3a129fafdf94f9cc0a2e4ca09a3c914650be52355db7ad0bbdb6/aiohttp-3.14.5-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [
+        "aiohappyeyeballs",
+        "aiosignal",
+        "attrs",
+        "frozenlist",
+        "multidict",
+        "propcache",
+        "yarl"
+      ],
+      "name": "aiohttp",
+      "version": "3.14.5"
+    },
+    {
+      "artifact": {
+        "filename": "aiosignal-1.4.0-py3-none-any.whl",
+        "sha256": "053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e",
+        "url": "https://files.pythonhosted.org/packages/fb/76/641ae371508676492379f16e2fa48f4e2c11741bd63c48be4b12a6b09cba/aiosignal-1.4.0-py3-none-any.whl"
+      },
+      "dependencies": [
+        "frozenlist"
+      ],
+      "name": "aiosignal",
+      "version": "1.4.0"
+    },
+    {
+      "artifact": {
+        "filename": "annotated_doc-0.0.7-py3-none-any.whl",
+        "sha256": "6bc31bbbec6dfaaedc1676dbc11dbda96fe22a2b5c400e9ebad113fec44a9dc6",
+        "url": "https://files.pythonhosted.org/packages/5e/b1/9530d6bee606979d54501adcc767d958a38929827f11a524b0d93429d2ad/annotated_doc-0.0.7-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "annotated-doc",
+      "version": "0.0.7"
+    },
+    {
+      "artifact": {
+        "filename": "annotated_types-0.8.0-py3-none-any.whl",
+        "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
+        "url": "https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8628a49c68ce14148cd9f6431094859a90/annotated_types-0.8.0-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "annotated-types",
+      "version": "0.8.0"
+    },
+    {
+      "artifact": {
+        "filename": "anyio-4.16.0-py3-none-any.whl",
+        "sha256": "c66ae634e0b8228396b801741beb3294326d4b6102f7bba4041c0dfb58c29026",
+        "url": "https://files.pythonhosted.org/packages/a9/16/7757fb84c819accc7d7e9af5291b261e4abb8627ee040f99e7d35ef2457a/anyio-4.16.0-py3-none-any.whl"
+      },
+      "dependencies": [
+        "idna",
+        "typing-extensions"
+      ],
+      "name": "anyio",
+      "version": "4.16.0"
+    },
+    {
+      "artifact": {
+        "filename": "attrs-26.1.0-py3-none-any.whl",
+        "sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+        "url": "https://files.pythonhosted.org/packages/64/b4/17d4b0b2a2dc85a6df63d1157e028ed19f90d4cd97c36717afef2bc2f395/attrs-26.1.0-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "attrs",
+      "version": "26.1.0"
+    },
+    {
+      "artifact": {
+        "filename": "boto3-1.40.72-py3-none-any.whl",
+        "sha256": "1063a295712f2605d3e463e4dc1fe32fce17cf77a0f4d3bb14249d68533ee856",
+        "url": "https://files.pythonhosted.org/packages/03/52/ec01e9814379a049852a1eec7d0bd9afd92a3176cbc6ec54e9c70c1afe7f/boto3-1.40.72-py3-none-any.whl"
+      },
+      "dependencies": [
+        "botocore",
+        "jmespath",
+        "s3transfer"
+      ],
+      "name": "boto3",
+      "version": "1.40.72"
+    },
+    {
+      "artifact": {
+        "filename": "botocore-1.40.72-py3-none-any.whl",
+        "sha256": "4f859e5aaf871fe59aac431d6bba59cc0c8ed8a38da2a6a5345700bdc5c74b32",
+        "url": "https://files.pythonhosted.org/packages/05/25/7332e9443d5eda0ccb06270e058aed385199be1035b1a8f58c24eb7378db/botocore-1.40.72-py3-none-any.whl"
+      },
+      "dependencies": [
+        "jmespath",
+        "python-dateutil",
+        "urllib3"
+      ],
+      "name": "botocore",
+      "version": "1.40.72"
+    },
+    {
+      "artifact": {
+        "filename": "certifi-2026.11.20-py3-none-any.whl",
+        "sha256": "7422df25243767b9877031a2248cb14d09ddac9beee846f4cef3d5c9191d488f",
+        "url": "https://files.pythonhosted.org/packages/6d/39/5eec3296860b94ac20bb8ed807725b88f6adfab3f343df592afd975f5f86/certifi-2026.11.20-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "certifi",
+      "version": "2026.11.20"
+    },
+    {
+      "artifact": {
+        "filename": "charset_normalizer-3.5.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "34276fd796040bf0993ab33a369aa572e6979c7aab225a88893667ad8eac8f7a",
+        "url": "https://files.pythonhosted.org/packages/18/24/bad3ac4271589df29cf5ce2f5ae490518a5739358052bd0d61209e6fea54/charset_normalizer-3.5.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "charset-normalizer",
+      "version": "3.5.2"
+    },
+    {
+      "artifact": {
+        "filename": "click-8.5.1-py3-none-any.whl",
+        "sha256": "8bb5376d2006950386f8c6427613334a2acadc5f559cb80e638d00b4df957e37",
+        "url": "https://files.pythonhosted.org/packages/31/7d/164b7ffc8624fe9efb4221bf9af485d5c1e41b9ae118045d2b6dc5457d8b/click-8.5.1-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "click",
+      "version": "8.5.1"
+    },
+    {
+      "artifact": {
+        "filename": "cuda_bindings-13.5.0-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "99746f2928150042191edf7952323bb22e8f104f7bcee787bd7e2001a8bba70b",
+        "url": "https://files.pythonhosted.org/packages/b9/fc/220c4d23f2675d237fb3a1fb5b35a77b82825c5a5097451b3d0da55d5160/cuda_bindings-13.5.0-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [
+        "cuda-pathfinder"
+      ],
+      "name": "cuda-bindings",
+      "version": "13.5.0"
+    },
+    {
+      "artifact": {
+        "filename": "cuda_pathfinder-1.9.1-py3-none-any.whl",
+        "sha256": "b743c132f90ad2d1e71d43fd28f31ebcde518f943e50fd44aca62b2a80d5230d",
+        "url": "https://files.pythonhosted.org/packages/62/8e/e6101ff068e7e78b362879ffc0c7cbfe68c9742943c9b034f009fe19f88f/cuda_pathfinder-1.9.1-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "cuda-pathfinder",
+      "version": "1.9.1"
+    },
+    {
+      "artifact": {
+        "filename": "cuda_toolkit-13.0.3.0-py2.py3-none-any.whl",
+        "sha256": "d693caaa261214ddd7dbb60d68e71cbed884e68c2be7509778f3051da0b91c3f",
+        "url": "https://files.pythonhosted.org/packages/d1/c7/a79086a62c98befcdb8349656c6f114e2db3b8b2422f6e25c97a7f2a9a3c/cuda_toolkit-13.0.3.0-py2.py3-none-any.whl"
+      },
+      "dependencies": [
+        "nvidia-cublas",
+        "nvidia-cuda-cupti",
+        "nvidia-cuda-nvrtc",
+        "nvidia-cuda-runtime",
+        "nvidia-cufft",
+        "nvidia-cufile",
+        "nvidia-curand",
+        "nvidia-cusolver",
+        "nvidia-cusparse",
+        "nvidia-nvjitlink",
+        "nvidia-nvtx"
+      ],
+      "name": "cuda-toolkit",
+      "version": "13.0.3.0"
+    },
+    {
+      "artifact": {
+        "filename": "datasets-5.0.1-py3-none-any.whl",
+        "sha256": "9fbf73688f8c18f7529b4fe592abd04015f81d1e58001e4bac73ffb2b39d7cc4",
+        "url": "https://files.pythonhosted.org/packages/44/0b/98fc6eb83333508ca5f44c52b3e287ea8137a0ad582714e2cbc67a02154b/datasets-5.0.1-py3-none-any.whl"
+      },
+      "dependencies": [
+        "dill",
+        "filelock",
+        "fsspec",
+        "httpx",
+        "huggingface-hub",
+        "multiprocess",
+        "numpy",
+        "packaging",
+        "pandas",
+        "pyarrow",
+        "pyyaml",
+        "requests",
+        "tqdm",
+        "xxhash"
+      ],
+      "name": "datasets",
+      "version": "5.0.1"
+    },
+    {
+      "artifact": {
+        "filename": "dill-0.4.1-py3-none-any.whl",
+        "sha256": "1e1ce33e978ae97fcfcff5638477032b801c46c7c65cf717f95fbc2248f79a9d",
+        "url": "https://files.pythonhosted.org/packages/1e/77/dc8c558f7593132cf8fefec57c4f60c83b16941c574ac5f619abb3ae7933/dill-0.4.1-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "dill",
+      "version": "0.4.1"
+    },
+    {
+      "artifact": {
+        "filename": "filelock-4.3.0-py3-none-any.whl",
+        "sha256": "f933f39f7e01249a4a49b9abab30edc6d4b874624c3de5dd0b0d137aa8adb979",
+        "url": "https://files.pythonhosted.org/packages/68/66/870b527908a06c7ec0e91239bd2c4d0bb22921efd4f915428b4e47d461a6/filelock-4.3.0-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "filelock",
+      "version": "4.3.0"
+    },
+    {
+      "artifact": {
+        "filename": "frozenlist-1.8.0-cp314-cp314-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+        "sha256": "cba69cb73723c3f329622e34bdbf5ce1f80c21c290ff04256cff1cd3c2036ed2",
+        "url": "https://files.pythonhosted.org/packages/a7/b2/fabede9fafd976b991e9f1b9c8c873ed86f202889b864756f240ce6dd855/frozenlist-1.8.0-cp314-cp314-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "frozenlist",
+      "version": "1.8.0"
+    },
+    {
+      "artifact": {
+        "filename": "fsspec-2026.6.0-py3-none-any.whl",
+        "sha256": "02e0b71817df9b2169dc30a16832045764def1191b43dcff5bb85bdee212d2a1",
+        "url": "https://files.pythonhosted.org/packages/e5/22/4222d7ddf3da30f363edaa98e329c2bce6c65497c9cb2810931c8b2c0fbc/fsspec-2026.6.0-py3-none-any.whl"
+      },
+      "dependencies": [
+        "aiohttp"
+      ],
+      "name": "fsspec",
+      "version": "2026.6.0"
+    },
+    {
+      "artifact": {
+        "filename": "h11-0.16.0-py3-none-any.whl",
+        "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+        "url": "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "h11",
+      "version": "0.16.0"
+    },
+    {
+      "artifact": {
+        "filename": "hf_xet-1.8.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "29dab7c904cd1914a0439c6e1306c12c7497c8bd32290fbe563ebf51ca4b6d6d",
+        "url": "https://files.pythonhosted.org/packages/f8/1e/1e8ecc05ef034e9a95c18ed32d2ec07905a7cd2ca611a9d88e25ee1f4850/hf_xet-1.8.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "hf-xet",
+      "version": "1.8.0"
+    },
+    {
+      "artifact": {
+        "filename": "httpcore-1.0.9-py3-none-any.whl",
+        "sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+        "url": "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl"
+      },
+      "dependencies": [
+        "certifi",
+        "h11"
+      ],
+      "name": "httpcore",
+      "version": "1.0.9"
+    },
+    {
+      "artifact": {
+        "filename": "httpx-0.28.1-py3-none-any.whl",
+        "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
+        "url": "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl"
+      },
+      "dependencies": [
+        "anyio",
+        "certifi",
+        "httpcore",
+        "idna"
+      ],
+      "name": "httpx",
+      "version": "0.28.1"
+    },
+    {
+      "artifact": {
+        "filename": "huggingface_hub-1.33.0-py3-none-any.whl",
+        "sha256": "04e434b06e100eddbce9a6e817d72693a7884b10a79bd67ab48080d5c07eb899",
+        "url": "https://files.pythonhosted.org/packages/fc/16/963096d224b80909432dc16561a615fd33d2d13beef3ce4c63fa25e40867/huggingface_hub-1.33.0-py3-none-any.whl"
+      },
+      "dependencies": [
+        "click",
+        "filelock",
+        "fsspec",
+        "hf-xet",
+        "httpx",
+        "packaging",
+        "pyyaml",
+        "tqdm",
+        "typing-extensions"
+      ],
+      "name": "huggingface-hub",
+      "version": "1.33.0"
+    },
+    {
+      "artifact": {
+        "filename": "idna-3.20-py3-none-any.whl",
+        "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+        "url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "idna",
+      "version": "3.20"
+    },
+    {
+      "artifact": {
+        "filename": "jinja2-3.1.6-py3-none-any.whl",
+        "sha256": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+        "url": "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl"
+      },
+      "dependencies": [
+        "markupsafe"
+      ],
+      "name": "jinja2",
+      "version": "3.1.6"
+    },
+    {
+      "artifact": {
+        "filename": "jmespath-1.1.0-py3-none-any.whl",
+        "sha256": "a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64",
+        "url": "https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "jmespath",
+      "version": "1.1.0"
+    },
+    {
+      "artifact": {
+        "filename": "markdown_it_py-4.3.0-py3-none-any.whl",
+        "sha256": "7aa1511a46c39138de78d9eba92ce47e63124d8003fc98b3a351909e04239efa",
+        "url": "https://files.pythonhosted.org/packages/c9/31/5f0ac2f1a1c67423c995c731a11cd4ad05d081a2be969d74f868bdb9cc70/markdown_it_py-4.3.0-py3-none-any.whl"
+      },
+      "dependencies": [
+        "mdurl"
+      ],
+      "name": "markdown-it-py",
+      "version": "4.3.0"
+    },
+    {
+      "artifact": {
+        "filename": "markupsafe-3.0.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "a8e9f292fcda89b324f2f5c91d13f1424a153e40fc2756f38ee23b15835ff300",
+        "url": "https://files.pythonhosted.org/packages/8f/db/d7282caf7ab03af44d5d6fdbaa019b35c7d7f1c90588b839c07cba640d6a/markupsafe-3.0.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "markupsafe",
+      "version": "3.0.4"
+    },
+    {
+      "artifact": {
+        "filename": "mdurl-0.1.2-py3-none-any.whl",
+        "sha256": "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8",
+        "url": "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "mdurl",
+      "version": "0.1.2"
+    },
+    {
+      "artifact": {
+        "filename": "mpmath-1.3.0-py3-none-any.whl",
+        "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c",
+        "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "mpmath",
+      "version": "1.3.0"
+    },
+    {
+      "artifact": {
+        "filename": "multidict-7.2.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "822a7fcd33f6922b650e1b26594f09d53c5d011fe655fea7ded27b2728ce2a1b",
+        "url": "https://files.pythonhosted.org/packages/3b/8f/bff861e3bd5a7cc13bd1f040d22aee8aa32b4f2755bba29b0c31a1d2ae25/multidict-7.2.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "multidict",
+      "version": "7.2.1"
+    },
+    {
+      "artifact": {
+        "filename": "multiprocess-0.70.19-py314-none-any.whl",
+        "sha256": "e8cc7fbdff15c0613f0a1f1f8744bef961b0a164c0ca29bdff53e9d2d93c5e5f",
+        "url": "https://files.pythonhosted.org/packages/a0/61/af9115673a5870fd885247e2f1b68c4f1197737da315b520a91c757a861a/multiprocess-0.70.19-py314-none-any.whl"
+      },
+      "dependencies": [
+        "dill"
+      ],
+      "name": "multiprocess",
+      "version": "0.70.19"
+    },
+    {
+      "artifact": {
+        "filename": "networkx-3.7-py3-none-any.whl",
+        "sha256": "e3fd2c13a7814cee3746340d8d7f8598a67f16a58bf47fb7f8793fab6efca1b0",
+        "url": "https://files.pythonhosted.org/packages/7e/cd/fe58041e9011f307c490e3e17dd48cc516448f7c698a3f2d9d9d65d7e6a8/networkx-3.7-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "networkx",
+      "version": "3.7"
+    },
+    {
+      "artifact": {
+        "filename": "numpy-2.5.5-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "c48960d420e90cf305cb1fde0d4e6082cc90512cda87a9acf0b6e04e91cf4abe",
+        "url": "https://files.pythonhosted.org/packages/a4/1f/fcdce1061fba2bfb2e9bfda01fbd8132d5f7522a4f7c8e2b2f629d54ee38/numpy-2.5.5-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "numpy",
+      "version": "2.5.5"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_cublas-13.1.1.3-py3-none-manylinux_2_27_x86_64.whl",
+        "sha256": "37936a16db8fe4ac1f065c2139360608a543a09275cb1a1af612e08cfa065436",
+        "url": "https://files.pythonhosted.org/packages/3b/cd/154ca20c38269e05eff77c1464e6c1da89f50a6390b565e9d82e06bc11e1/nvidia_cublas-13.1.1.3-py3-none-manylinux_2_27_x86_64.whl"
+      },
+      "dependencies": [
+        "nvidia-cuda-nvrtc"
+      ],
+      "name": "nvidia-cublas",
+      "version": "13.1.1.3"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_cuda_cupti-13.0.85-py3-none-manylinux_2_25_x86_64.whl",
+        "sha256": "4eb01c08e859bf924d222250d2e8f8b8ff6d3db4721288cf35d14252a4d933c8",
+        "url": "https://files.pythonhosted.org/packages/33/6d/737d164b4837a9bbd202f5ae3078975f0525a55730fe871d8ed4e3b952b0/nvidia_cuda_cupti-13.0.85-py3-none-manylinux_2_25_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "nvidia-cuda-cupti",
+      "version": "13.0.85"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_cuda_nvrtc-13.0.88-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
+        "sha256": "ad9b6d2ead2435f11cbb6868809d2adeeee302e9bb94bcf0539c7a40d80e8575",
+        "url": "https://files.pythonhosted.org/packages/c3/68/483a78f5e8f31b08fb1bb671559968c0ca3a065ac7acabfc7cee55214fd6/nvidia_cuda_nvrtc-13.0.88-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "nvidia-cuda-nvrtc",
+      "version": "13.0.88"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_cuda_runtime-13.0.96-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "7f82250d7782aa23b6cfe765ecc7db554bd3c2870c43f3d1821f1d18aebf0548",
+        "url": "https://files.pythonhosted.org/packages/2e/24/d1558f3b68b1d26e706813b1d10aa1d785e4698c425af8db8edc3dced472/nvidia_cuda_runtime-13.0.96-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "nvidia-cuda-runtime",
+      "version": "13.0.96"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_cudnn_cu13-9.24.0.43-py3-none-manylinux_2_27_x86_64.whl",
+        "sha256": "71f181cd810e90f9b6023b01186fe82d13d65f0ec098581ee201d39fad769e4b",
+        "url": "https://files.pythonhosted.org/packages/5c/ba/791cffd048fe5b044e620df55267e3e95c0e6e07d50b41e377c03dfc910f/nvidia_cudnn_cu13-9.24.0.43-py3-none-manylinux_2_27_x86_64.whl"
+      },
+      "dependencies": [
+        "nvidia-cublas"
+      ],
+      "name": "nvidia-cudnn-cu13",
+      "version": "9.24.0.43"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_cufft-12.0.0.61-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "6c44f692dce8fd5ffd3e3df134b6cdb9c2f72d99cf40b62c32dde45eea9ddad3",
+        "url": "https://files.pythonhosted.org/packages/a8/2f/7b57e29836ea8714f81e9898409196f47d772d5ddedddf1592eadb8ab743/nvidia_cufft-12.0.0.61-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+      },
+      "dependencies": [
+        "nvidia-nvjitlink"
+      ],
+      "name": "nvidia-cufft",
+      "version": "12.0.0.61"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_cufile-1.15.1.6-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "08a3ecefae5a01c7f5117351c64f17c7c62efa5fffdbe24fc7d298da19cd0b44",
+        "url": "https://files.pythonhosted.org/packages/3f/70/4f193de89a48b71714e74602ee14d04e4019ad36a5a9f20c425776e72cd6/nvidia_cufile-1.15.1.6-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "nvidia-cufile",
+      "version": "1.15.1.6"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_curand-10.4.0.35-py3-none-manylinux_2_27_x86_64.whl",
+        "sha256": "1aee33a5da6e1db083fe2b90082def8915f30f3248d5896bcec36a579d941bfc",
+        "url": "https://files.pythonhosted.org/packages/a5/9f/be0a41ca4a4917abf5cb9ae0daff1a6060cc5de950aec0396de9f3b52bc5/nvidia_curand-10.4.0.35-py3-none-manylinux_2_27_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "nvidia-curand",
+      "version": "10.4.0.35"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_cusolver-12.0.4.66-py3-none-manylinux_2_27_x86_64.whl",
+        "sha256": "0a759da5dea5c0ea10fd307de75cdeb59e7ea4fcb8add0924859b944babf1112",
+        "url": "https://files.pythonhosted.org/packages/5f/67/cba3777620cdacb99102da4042883709c41c709f4b6323c10781a9c3aa34/nvidia_cusolver-12.0.4.66-py3-none-manylinux_2_27_x86_64.whl"
+      },
+      "dependencies": [
+        "nvidia-cublas",
+        "nvidia-cusparse",
+        "nvidia-nvjitlink"
+      ],
+      "name": "nvidia-cusolver",
+      "version": "12.0.4.66"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_cusparse-12.6.3.3-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "2b3c89c88d01ee0e477cb7f82ef60a11a4bcd57b6b87c33f789350b59759360b",
+        "url": "https://files.pythonhosted.org/packages/fa/18/623c77619c31d62efd55302939756966f3ecc8d724a14dab2b75f1508850/nvidia_cusparse-12.6.3.3-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+      },
+      "dependencies": [
+        "nvidia-nvjitlink"
+      ],
+      "name": "nvidia-cusparse",
+      "version": "12.6.3.3"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_x86_64.whl",
+        "sha256": "786ce87568c303fadb5afcc7102d454cd3040d75f6f8626f5db460d1871f4dd0",
+        "url": "https://files.pythonhosted.org/packages/34/7d/2661f2fb3ac4302f3a246f5fc030213ac60c1fe0bce84f9783dbd831dbb7/nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "nvidia-cusparselt-cu13",
+      "version": "0.8.1"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_nccl_cu13-2.30.7-py3-none-manylinux_2_18_x86_64.whl",
+        "sha256": "cefa7fdb9710efd0f39c5f1be1d61ff6fc9a996c451265bd7fbdcf9455ed4b50",
+        "url": "https://files.pythonhosted.org/packages/3f/34/c500f90c7ae641b8e0f98965b36b8a7ac79cc8b296e8d251fe3eb592ee54/nvidia_nccl_cu13-2.30.7-py3-none-manylinux_2_18_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "nvidia-nccl-cu13",
+      "version": "2.30.7"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_nvjitlink-13.5.37-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
+        "sha256": "280d7cb9649704145f074b8dbde500de04ce02d0872e066e20a83c17bcaa93eb",
+        "url": "https://files.pythonhosted.org/packages/cc/1f/2321702b8d60b4b4dd18b957f61612dbac9cb1c07e940cf6582106b7c8b8/nvidia_nvjitlink-13.5.37-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "nvidia-nvjitlink",
+      "version": "13.5.37"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_nvshmem_cu13-3.4.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "290f0a2ee94c9f3687a02502f3b9299a9f9fe826e6d0287ee18482e78d495b80",
+        "url": "https://files.pythonhosted.org/packages/3c/35/a9bf80a609e74e3b000fef598933235c908fcefcef9026042b8e6dfde2a9/nvidia_nvshmem_cu13-3.4.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "nvidia-nvshmem-cu13",
+      "version": "3.4.5"
+    },
+    {
+      "artifact": {
+        "filename": "nvidia_nvtx-13.0.85-py3-none-manylinux1_x86_64.manylinux_2_5_x86_64.whl",
+        "sha256": "4936d1d6780fbe68db454f5e72a42ff64d1fd6397df9f363ae786930fd5c1cd4",
+        "url": "https://files.pythonhosted.org/packages/c2/f3/d86c845465a2723ad7e1e5c36dcd75ddb82898b3f53be47ebd429fb2fa5d/nvidia_nvtx-13.0.85-py3-none-manylinux1_x86_64.manylinux_2_5_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "nvidia-nvtx",
+      "version": "13.0.85"
+    },
+    {
+      "artifact": {
+        "filename": "packaging-26.3-py3-none-any.whl",
+        "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+        "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "packaging",
+      "version": "26.3"
+    },
+    {
+      "artifact": {
+        "filename": "pandas-3.1.1-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "326459d8a9be11b5f48c7fc1d63e38ba7cfeaebe5d41bd19e4c5f4f11dc9ac91",
+        "url": "https://files.pythonhosted.org/packages/23/c3/dcf098d687f1f31c97b9c3869809fa2cdb6598039299167f6dfe0cf0c3a5/pandas-3.1.1-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [
+        "numpy",
+        "python-dateutil"
+      ],
+      "name": "pandas",
+      "version": "3.1.1"
+    },
+    {
+      "artifact": {
+        "filename": "propcache-0.5.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "cc07876cfb079b6f6f36d21ce75784ad6c2c6b563eeac0ed26c2fa2669b85df9",
+        "url": "https://files.pythonhosted.org/packages/96/d3/e97cd6f5de2176bd90ed4076c7a9b5e09d0f0b9687d00a576507988bb62c/propcache-0.5.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "propcache",
+      "version": "0.5.4"
+    },
+    {
+      "artifact": {
+        "filename": "psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "076a2d2f923fd4821644f5ba89f059523da90dc9014e85f8e45a5774ca5bc6f9",
+        "url": "https://files.pythonhosted.org/packages/b5/70/5d8df3b09e25bce090399cf48e452d25c935ab72dad19406c77f4e828045/psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "psutil",
+      "version": "7.2.2"
+    },
+    {
+      "artifact": {
+        "filename": "pyarrow-26.0.1-cp314-cp314-manylinux_2_28_x86_64.whl",
+        "sha256": "7ae48ab53610b85e004b03bccff593fbdf22186d0ab48ed42c90797915dac814",
+        "url": "https://files.pythonhosted.org/packages/f3/57/755a1b54d37c2a9e2c283d8bc648a50aa4ce57f977ce6a4b1d65eba29f51/pyarrow-26.0.1-cp314-cp314-manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "pyarrow",
+      "version": "26.0.1"
+    },
+    {
+      "artifact": {
+        "filename": "pydantic-2.14.4-py3-none-any.whl",
+        "sha256": "653a2ad9f6d8858529c77c72717d0ea991d6c6837fe683246b2f4b2bbfc3fadc",
+        "url": "https://files.pythonhosted.org/packages/8a/8c/824a686c4ba815ddb0722f9e66272088bccd4e1ae1d2f7015375e4a4fc7f/pydantic-2.14.4-py3-none-any.whl"
+      },
+      "dependencies": [
+        "annotated-types",
+        "pydantic-core",
+        "typing-extensions",
+        "typing-inspection"
+      ],
+      "name": "pydantic",
+      "version": "2.14.4"
+    },
+    {
+      "artifact": {
+        "filename": "pydantic_core-2.50.5-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "88b543705849d0c59343f97c38296dbf59eb7b3c9565bd4fe1ed638ba38da5ed",
+        "url": "https://files.pythonhosted.org/packages/79/e3/df03dc4e10c460d37dad8921ec9c6f177bc33d4f2da808d5ae4d8f11acfe/pydantic_core-2.50.5-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+      },
+      "dependencies": [
+        "typing-extensions"
+      ],
+      "name": "pydantic-core",
+      "version": "2.50.5"
+    },
+    {
+      "artifact": {
+        "filename": "pygments-2.21.0-py3-none-any.whl",
+        "sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+        "url": "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "pygments",
+      "version": "2.21.0"
+    },
+    {
+      "artifact": {
+        "filename": "python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+        "sha256": "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427",
+        "url": "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl"
+      },
+      "dependencies": [
+        "six"
+      ],
+      "name": "python-dateutil",
+      "version": "2.9.0.post0"
+    },
+    {
+      "artifact": {
+        "filename": "pyyaml-6.0.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "c604dc2613c417130479cdd6e55c2faa691b6365aa82b3dafddfcecc2eaf1ac7",
+        "url": "https://files.pythonhosted.org/packages/ef/1b/54ce11b40c8fa1883f14eef46525c3c329509dcc268164074fbe60add8ed/pyyaml-6.0.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "pyyaml",
+      "version": "6.0.4"
+    },
+    {
+      "artifact": {
+        "filename": "regex-2026.11.19-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "7260c6e4c0370b1cef7f558c88e65fb8f30ca64be3918fedd125e081f87a154b",
+        "url": "https://files.pythonhosted.org/packages/b3/22/26c94ed7a43f497af07e39ae5c7a882f3e36df11b2b41e8e4cb6b1f3faaa/regex-2026.11.19-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "regex",
+      "version": "2026.11.19"
+    },
+    {
+      "artifact": {
+        "filename": "requests-2.34.2-py3-none-any.whl",
+        "sha256": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
+        "url": "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl"
+      },
+      "dependencies": [
+        "certifi",
+        "charset-normalizer",
+        "idna",
+        "urllib3"
+      ],
+      "name": "requests",
+      "version": "2.34.2"
+    },
+    {
+      "artifact": {
+        "filename": "rich-15.0.0-py3-none-any.whl",
+        "sha256": "33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb",
+        "url": "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl"
+      },
+      "dependencies": [
+        "markdown-it-py",
+        "pygments"
+      ],
+      "name": "rich",
+      "version": "15.0.0"
+    },
+    {
+      "artifact": {
+        "filename": "s3transfer-0.14.0-py3-none-any.whl",
+        "sha256": "ea3b790c7077558ed1f02a3072fb3cb992bbbd253392f4b6e9e8976941c7d456",
+        "url": "https://files.pythonhosted.org/packages/48/f0/ae7ca09223a81a1d890b2557186ea015f6e0502e9b8cb8e1813f1d8cfa4e/s3transfer-0.14.0-py3-none-any.whl"
+      },
+      "dependencies": [
+        "botocore"
+      ],
+      "name": "s3transfer",
+      "version": "0.14.0"
+    },
+    {
+      "artifact": {
+        "filename": "safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        "sha256": "fd6f3f93c9a0a7cc2788ee63fb763353d4bd2e89b0751bc78fcf7dda00bea774",
+        "url": "https://files.pythonhosted.org/packages/28/50/f203ff3a3ddfe19308efc83c5a3a29ed02bf786732ec35e68bf9162f3365/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "safetensors",
+      "version": "0.8.0"
+    },
+    {
+      "artifact": {
+        "filename": "setuptools-84.2.1-py3-none-any.whl",
+        "sha256": "ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2",
+        "url": "https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "setuptools",
+      "version": "84.2.1"
+    },
+    {
+      "artifact": {
+        "filename": "shellingham-1.5.4-py2.py3-none-any.whl",
+        "sha256": "7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686",
+        "url": "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "shellingham",
+      "version": "1.5.4"
+    },
+    {
+      "artifact": {
+        "filename": "six-1.17.0-py2.py3-none-any.whl",
+        "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+        "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "six",
+      "version": "1.17.0"
+    },
+    {
+      "artifact": {
+        "filename": "sympy-1.14.0-py3-none-any.whl",
+        "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5",
+        "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl"
+      },
+      "dependencies": [
+        "mpmath"
+      ],
+      "name": "sympy",
+      "version": "1.14.0"
+    },
+    {
+      "artifact": {
+        "filename": "tokenizers-0.23.3-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        "sha256": "376851d22bcf9d650a5c3090bb83e6cf9e895fbf0595369fa4cd43c1f69b5f87",
+        "url": "https://files.pythonhosted.org/packages/3a/40/6706b82693715581457c6d5423eaa7faae576bb0526c5738a57085eb4449/tokenizers-0.23.3-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+      },
+      "dependencies": [
+        "huggingface-hub"
+      ],
+      "name": "tokenizers",
+      "version": "0.23.3"
+    },
+    {
+      "artifact": {
+        "filename": "torch-2.14.0-cp314-cp314-manylinux_2_28_x86_64.whl",
+        "sha256": "b2cd92bce63d40bf6fc2e5d840fc2f0063bd180a242daa761cb6088cc2f46e27",
+        "url": "https://files.pythonhosted.org/packages/50/75/8d2b9a7e724759470c209489b79260cac537f091cc9aac8001c8d2bc845c/torch-2.14.0-cp314-cp314-manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [
+        "cuda-bindings",
+        "cuda-toolkit",
+        "filelock",
+        "fsspec",
+        "jinja2",
+        "networkx",
+        "nvidia-cudnn-cu13",
+        "nvidia-cusparselt-cu13",
+        "nvidia-nccl-cu13",
+        "nvidia-nvshmem-cu13",
+        "setuptools",
+        "sympy",
+        "triton",
+        "typing-extensions"
+      ],
+      "name": "torch",
+      "version": "2.14.0"
+    },
+    {
+      "artifact": {
+        "filename": "tqdm-4.70.1-py3-none-any.whl",
+        "sha256": "c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73",
+        "url": "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "tqdm",
+      "version": "4.70.1"
+    },
+    {
+      "artifact": {
+        "filename": "transformers-5.17.0-py3-none-any.whl",
+        "sha256": "78ec1ce21579b38dfb83950a0658cd119f87212a2fcfdff478096ce9d6c03801",
+        "url": "https://files.pythonhosted.org/packages/e8/d0/c502b60d684adbd98a8dc7d5bb866842772b816ac4354e4608be240041ae/transformers-5.17.0-py3-none-any.whl"
+      },
+      "dependencies": [
+        "huggingface-hub",
+        "numpy",
+        "packaging",
+        "pyyaml",
+        "regex",
+        "safetensors",
+        "tokenizers",
+        "tqdm",
+        "typer"
+      ],
+      "name": "transformers",
+      "version": "5.17.0"
+    },
+    {
+      "artifact": {
+        "filename": "triton-3.8.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "387dae4cb0089a7b6ba1a428ae0782b65c4c58f57d94617cb22ca8593d8ccbca",
+        "url": "https://files.pythonhosted.org/packages/93/d9/08c75f3459f19ad00425b564058e40efa4bcd79b816064cf27499303ea42/triton-3.8.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "triton",
+      "version": "3.8.0"
+    },
+    {
+      "artifact": {
+        "filename": "typer-0.29.2-py3-none-any.whl",
+        "sha256": "f30731f8ca758368b836b3714872e58e395cef8fcaff918c853b1969ed5274e7",
+        "url": "https://files.pythonhosted.org/packages/62/f3/864dcb0e165b52e9f75aa3c7e0aeeb9876f139c66eb14d87856bb173b0fa/typer-0.29.2-py3-none-any.whl"
+      },
+      "dependencies": [
+        "annotated-doc",
+        "pydantic",
+        "rich",
+        "shellingham"
+      ],
+      "name": "typer",
+      "version": "0.29.2"
+    },
+    {
+      "artifact": {
+        "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+        "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+        "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "typing-extensions",
+      "version": "4.16.0"
+    },
+    {
+      "artifact": {
+        "filename": "typing_inspection-0.4.5-py3-none-any.whl",
+        "sha256": "bc210535442b39e1bf2805e0c7a17dfd6a4ace760c84c7f7d16245d23a6b1c39",
+        "url": "https://files.pythonhosted.org/packages/de/0c/ea2544850a7c135e15033a5c7a8e7211136184b7ae63e2239d557c2b3019/typing_inspection-0.4.5-py3-none-any.whl"
+      },
+      "dependencies": [
+        "typing-extensions"
+      ],
+      "name": "typing-inspection",
+      "version": "0.4.5"
+    },
+    {
+      "artifact": {
+        "filename": "urllib3-2.8.0-py3-none-any.whl",
+        "sha256": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3",
+        "url": "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl"
+      },
+      "dependencies": [],
+      "name": "urllib3",
+      "version": "2.8.0"
+    },
+    {
+      "artifact": {
+        "filename": "xxhash-4.1.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "947868e22608b7bdee242532e707e63d22abf70d05d158640ca2ab94596d63ec",
+        "url": "https://files.pythonhosted.org/packages/ed/2b/bcf98949b14d64af7720f15b05f24d428e221f1ba43b9023b12eaf0e38be/xxhash-4.1.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [],
+      "name": "xxhash",
+      "version": "4.1.0"
+    },
+    {
+      "artifact": {
+        "filename": "yarl-1.25.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "30eec96e8a91bd588ce897c9543f6d5d8d34b28fbcba28a4dedf20ebeae9fe57",
+        "url": "https://files.pythonhosted.org/packages/a2/be/415b00c0fe5a0615b062a456b26623d7ec91c2bee20faea1a14045aa0469/yarl-1.25.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      },
+      "dependencies": [
+        "idna",
+        "multidict",
+        "propcache"
+      ],
+      "name": "yarl",
+      "version": "1.25.1"
+    }
+  ],
+  "resolution": {
+    "package_count": 82,
+    "package_names": [
+      "accelerate",
+      "aiohappyeyeballs",
+      "aiohttp",
+      "aiosignal",
+      "annotated-doc",
+      "annotated-types",
+      "anyio",
+      "attrs",
+      "boto3",
+      "botocore",
+      "certifi",
+      "charset-normalizer",
+      "click",
+      "cuda-bindings",
+      "cuda-pathfinder",
+      "cuda-toolkit",
+      "datasets",
+      "dill",
+      "filelock",
+      "frozenlist",
+      "fsspec",
+      "h11",
+      "hf-xet",
+      "httpcore",
+      "httpx",
+      "huggingface-hub",
+      "idna",
+      "jinja2",
+      "jmespath",
+      "markdown-it-py",
+      "markupsafe",
+      "mdurl",
+      "mpmath",
+      "multidict",
+      "multiprocess",
+      "networkx",
+      "numpy",
+      "nvidia-cublas",
+      "nvidia-cuda-cupti",
+      "nvidia-cuda-nvrtc",
+      "nvidia-cuda-runtime",
+      "nvidia-cudnn-cu13",
+      "nvidia-cufft",
+      "nvidia-cufile",
+      "nvidia-curand",
+      "nvidia-cusolver",
+      "nvidia-cusparse",
+      "nvidia-cusparselt-cu13",
+      "nvidia-nccl-cu13",
+      "nvidia-nvjitlink",
+      "nvidia-nvshmem-cu13",
+      "nvidia-nvtx",
+      "packaging",
+      "pandas",
+      "propcache",
+      "psutil",
+      "pyarrow",
+      "pydantic",
+      "pydantic-core",
+      "pygments",
+      "python-dateutil",
+      "pyyaml",
+      "regex",
+      "requests",
+      "rich",
+      "s3transfer",
+      "safetensors",
+      "setuptools",
+      "shellingham",
+      "six",
+      "sympy",
+      "tokenizers",
+      "torch",
+      "tqdm",
+      "transformers",
+      "triton",
+      "typer",
+      "typing-extensions",
+      "typing-inspection",
+      "urllib3",
+      "xxhash",
+      "yarl"
+    ]
+  },
+  "schema_version": 1,
+  "source": {
+    "artifact_host": "files.pythonhosted.org",
+    "index_url": "https://pypi.org/simple",
+    "only_binary": true
+  },
+  "target": {
+    "abi": "cp314",
+    "implementation": "cp",
+    "manylinux_ceiling": "manylinux_2_28_x86_64",
+    "operating_system": "linux",
+    "platform_machine": "x86_64",
+    "platform_system": "Linux",
+    "python_version": "3.14"
+  }
+}
